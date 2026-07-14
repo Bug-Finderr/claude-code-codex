@@ -21,6 +21,8 @@ $launcherPath = Join-Path $root 'ccx.ps1'
 Assert-True (Test-Path $launcherPath) 'ccx.ps1 exists'
 $launcher = Get-Content -Raw $launcherPath
 Assert-True ($launcher -match "Environment\['PYTHONUTF8'\]\s*=\s*'1'") 'LiteLLM child forces UTF-8 on Windows'
+Assert-True ($launcher -match 'ANTHROPIC_API_KEY\s*=\s*\$null') 'inherited Anthropic API key is cleared for Claude'
+Assert-True ($launcher -notmatch 'DISABLE_PROMPT_CACHING\s*=') 'prompt caching remains enabled'
 . $launcherPath
 
 $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-test-$([guid]::NewGuid().ToString('N'))"

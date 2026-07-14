@@ -69,6 +69,7 @@ function Invoke-Ccx {
     $claudeEnvironment = @{
         ANTHROPIC_BASE_URL = $baseUrl
         ANTHROPIC_AUTH_TOKEN = $gatewayToken
+        ANTHROPIC_API_KEY = $null
         ANTHROPIC_MODEL = 'gpt-5.6-sol'
         ANTHROPIC_DEFAULT_OPUS_MODEL = 'gpt-5.6-sol'
         ANTHROPIC_DEFAULT_SONNET_MODEL = 'gpt-5.6-sol'
@@ -76,7 +77,6 @@ function Invoke-Ccx {
         CLAUDE_CODE_SUBAGENT_MODEL = 'gpt-5.6-sol'
         CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = '1'
         CLAUDE_CODE_DISABLE_THINKING = '1'
-        DISABLE_PROMPT_CACHING = '1'
     }
 
     try {
