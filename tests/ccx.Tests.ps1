@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $configPath = Join-Path $root 'litellm.yaml'
+$gitignorePath = Join-Path $root '.gitignore'
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "FAIL: $Message" }
@@ -13,6 +14,8 @@ Assert-True ($config -match 'model:\s*openai/gpt-5\.6-sol') 'OpenAI provider mod
 Assert-True ($config -match 'api_key:\s*os\.environ/OPENAI_API_KEY') 'API key comes from the environment'
 Assert-True ($config -match 'master_key:\s*os\.environ/LITELLM_MASTER_KEY') 'gateway key comes from the environment'
 Assert-True ($config -notmatch 'sk-[A-Za-z0-9_-]{12,}') 'no key is persisted in YAML'
+Assert-True (Test-Path $gitignorePath) '.gitignore exists'
+Assert-True ((Get-Content -Raw $gitignorePath) -match '(?m)^logs/$') 'runtime logs are ignored'
 
 $launcherPath = Join-Path $root 'ccx.ps1'
 Assert-True (Test-Path $launcherPath) 'ccx.ps1 exists'
