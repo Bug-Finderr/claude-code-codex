@@ -61,6 +61,7 @@ function Invoke-Ccx {
     }
     $startInfo.Environment['OPENAI_API_KEY'] = $openAIKey
     $startInfo.Environment['LITELLM_MASTER_KEY'] = $gatewayToken
+    $startInfo.Environment['PYTHONUTF8'] = '1'
 
     $gateway = [System.Diagnostics.Process]::new()
     $gateway.StartInfo = $startInfo

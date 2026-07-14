@@ -19,6 +19,8 @@ Assert-True ((Get-Content -Raw $gitignorePath) -match '(?m)^logs/$') 'runtime lo
 
 $launcherPath = Join-Path $root 'ccx.ps1'
 Assert-True (Test-Path $launcherPath) 'ccx.ps1 exists'
+$launcher = Get-Content -Raw $launcherPath
+Assert-True ($launcher -match "Environment\['PYTHONUTF8'\]\s*=\s*'1'") 'LiteLLM child forces UTF-8 on Windows'
 . $launcherPath
 
 $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-test-$([guid]::NewGuid().ToString('N'))"
