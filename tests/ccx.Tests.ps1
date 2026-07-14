@@ -46,4 +46,21 @@ Assert-True ($token -match '^sk-ccx-[a-f0-9]{32}$') 'gateway token has the requi
 $port = Get-FreeTcpPort
 Assert-True ($port -ge 1024 -and $port -le 65535) 'ephemeral port is valid'
 
+$cleanupPort = Get-FreeTcpPort
+$cleanupProcess = Start-Process python -ArgumentList @(
+    '-c',
+    "import time; marker='litellm'; time.sleep(30)",
+    '--config',
+    $configPath,
+    '--port',
+    [string]$cleanupPort
+) -PassThru -WindowStyle Hidden
+try {
+    Start-Sleep -Milliseconds 300
+    Stop-GatewayProcesses -Process $null -Port $cleanupPort -ConfigPath $configPath
+    Assert-True ($cleanupProcess.WaitForExit(5000)) 'orphaned gateway process is terminated by config and port'
+} finally {
+    if (-not $cleanupProcess.HasExited) { & taskkill.exe /PID $cleanupProcess.Id /T /F 2>$null | Out-Null }
+}
+
 'PASS: gateway configuration'

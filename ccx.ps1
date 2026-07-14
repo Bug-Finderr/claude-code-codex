@@ -23,12 +23,27 @@ function Get-FreeTcpPort {
     }
 }
 
-function Stop-ProcessTree {
-    param([System.Diagnostics.Process]$Process)
+function Stop-GatewayProcesses {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][int]$Port,
+        [Parameter(Mandatory)][string]$ConfigPath
+    )
 
     if ($Process -and -not $Process.HasExited) {
         & taskkill.exe /PID $Process.Id /T /F 2>$null | Out-Null
     }
+
+    $configPattern = [regex]::Escape($ConfigPath)
+    $portPattern = "--port(?:=|\s+)$Port(?:\s|$)"
+    Get-CimInstance Win32_Process |
+        Where-Object {
+            $_.ProcessId -ne $PID -and
+            $_.CommandLine -match 'litellm' -and
+            $_.CommandLine -match $configPattern -and
+            $_.CommandLine -match $portPattern
+        } |
+        ForEach-Object { & taskkill.exe /PID $_.ProcessId /T /F 2>$null | Out-Null }
 }
 
 function Invoke-Ccx {
@@ -107,7 +122,7 @@ function Invoke-Ccx {
         foreach ($name in $claudeEnvironment.Keys) {
             [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
         }
-        Stop-ProcessTree -Process $gateway
+        Stop-GatewayProcesses -Process $gateway -Port $port -ConfigPath $configPath
         if ($stdout) { $stdout.GetAwaiter().GetResult() | Set-Content -LiteralPath $logPath }
         if ($stderr) { $stderr.GetAwaiter().GetResult() | Add-Content -LiteralPath $logPath }
         $openAIKey = $null
