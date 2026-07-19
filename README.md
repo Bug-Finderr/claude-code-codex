@@ -34,8 +34,8 @@ ccx -p 'Reply with exactly: CCX_OK' --output-format text
 Select another OpenAI model with either wrapper form:
 
 ```powershell
-ccx --model gpt-5.6-sol
-ccx --model=gpt-5.6-sol -p 'Summarize this repository'
+ccx --model gpt-5.6-terra
+ccx --model=gpt-5.6-luna -p 'Summarize this repository'
 ```
 
 `ccx` consumes `--model` only before the first `--`. The separator itself is removed, and every later argument is passed literally to Claude Code:
