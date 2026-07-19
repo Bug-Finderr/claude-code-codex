@@ -44,12 +44,12 @@ ccx --model=gpt-5.6-sol -p 'Summarize this repository'
 ccx --model gpt-5.6-sol -- --verbose
 ```
 
-`ccx` preserves Claude Code's normal mode selection. With attached output it is interactive unless `-p` or `--print` is present; redirected output is noninteractive. Interactive runs suppress Claudish's package update check without forcing Claude JSON output.
+Invocations without `-p` or `--print` stay interactive, including positional prompts, flags, and resume flows. Interactive runs suppress Claudish's package update check without forcing Claude JSON output.
 
-Headless stdout flows through PowerShell's success stream so it can be captured or piped incrementally. Native stderr remains stderr, and the child exit code is returned as the script exit code rather than output.
+PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
 
-Every invocation explicitly disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag directly before the passthrough separator. It also disables Claudish usage stats, telemetry, logs, and diagnostics and skips model-catalog updates. The OpenAI key and official base URL are set on the Claudish translator child; the key is removed before Claude Code is spawned. Inherited Anthropic credentials are removed from Claudish without changing the parent PowerShell environment.
+Every invocation explicitly disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag directly before the passthrough separator. It temporarily sets the OpenAI key, official base URL, and Claudish isolation variables, removes inherited Anthropic credentials, and restores the parent environment afterward. The dependency patch removes the OpenAI key before Claude Code is spawned.
 
-`ccx` invokes the pinned local Claudish entry point directly with Bun. It does not start or manage a separate local gateway daemon. If PowerShell interrupts the invocation, the exact Claudish child process tree is terminated.
+`ccx` invokes the pinned local Claudish entry point directly with Bun. It does not start or manage a separate local gateway daemon.
 
 Claudish still creates session files under `~/.claudish`; version 7.15.0 may leave Windows `status-*.js` files behind.

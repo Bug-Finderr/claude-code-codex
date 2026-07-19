@@ -44,31 +44,14 @@ function Split-CcxArguments {
     }
 }
 
-function Test-CcxInteractive {
+function Get-ClaudishArguments {
     param(
-        [string[]]$ClaudeArgs = @(),
-        [bool]$OutputRedirected = [Console]::IsOutputRedirected
-    )
-
-    -not $OutputRedirected -and $ClaudeArgs -notcontains '-p' -and $ClaudeArgs -notcontains '--print'
-}
-
-function New-ClaudishStartInfo {
-    param(
-        [Parameter(Mandatory)][string]$BunPath,
         [Parameter(Mandatory)][string]$ClaudishPath,
         [Parameter(Mandatory)][string]$Model,
-        [string[]]$ClaudeArgs = @(),
-        [Parameter(Mandatory)][string]$OpenAIKey,
-        [Parameter(Mandatory)][bool]$Interactive
+        [string[]]$ClaudeArgs = @()
     )
 
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $BunPath
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = -not $Interactive
-    $startInfo.RedirectStandardError = -not $Interactive
-    $claudishArgs = @(
+    $arguments = @(
         $ClaudishPath,
         '--model', "oai@$Model",
         '--models-skip-update',
@@ -77,59 +60,44 @@ function New-ClaudishStartInfo {
         '--no-auto-approve',
         '--dangerously-skip-permissions'
     )
-    if ($Interactive) { $claudishArgs += '--interactive', '--json' }
-    $claudishArgs += '--'
-    if (-not $Interactive -and $ClaudeArgs.Count -eq 0) {
-        $claudishArgs += '--print'
-    } else {
-        $claudishArgs += $ClaudeArgs
+    if ($ClaudeArgs -notcontains '-p' -and $ClaudeArgs -notcontains '--print') {
+        $arguments += '--interactive', '--json'
     }
-    foreach ($argument in $claudishArgs) {
-        [void]$startInfo.ArgumentList.Add($argument)
-    }
-    $startInfo.Environment['OPENAI_API_KEY'] = $OpenAIKey
-    $startInfo.Environment['OPENAI_BASE_URL'] = 'https://api.openai.com'
-    $startInfo.Environment['CLAUDISH_STATS'] = 'off'
-    $startInfo.Environment['CLAUDISH_TELEMETRY'] = '0'
-    [void]$startInfo.Environment.Remove('ANTHROPIC_API_KEY')
-    [void]$startInfo.Environment.Remove('ANTHROPIC_AUTH_TOKEN')
-    $startInfo
+    $arguments += '--'
+    $arguments += $ClaudeArgs
+    $arguments
 }
 
-function Stop-CcxProcessTree {
-    param([Parameter(Mandatory)][System.Diagnostics.Process]$Process)
+function Invoke-CcxCommand {
+    param(
+        [Parameter(Mandatory)][string]$BunPath,
+        [string[]]$ClaudishArgs = @(),
+        [Parameter(Mandatory)][string]$OpenAIKey
+    )
 
-    if ($Process.HasExited) { return }
-    & taskkill.exe /PID ([string]$Process.Id) /T /F 2>$null | Out-Null
-    if (-not $Process.WaitForExit(5000)) { throw "Failed to terminate child process $($Process.Id)." }
-}
-
-function Invoke-ProcessStartInfo {
-    param([Parameter(Mandatory)][System.Diagnostics.ProcessStartInfo]$StartInfo)
-
-    $process = [System.Diagnostics.Process]::new()
-    $started = $false
+    $environment = [ordered]@{
+        OPENAI_API_KEY = $OpenAIKey
+        OPENAI_BASE_URL = 'https://api.openai.com'
+        CLAUDISH_STATS = 'off'
+        CLAUDISH_TELEMETRY = '0'
+        ANTHROPIC_API_KEY = $null
+        ANTHROPIC_AUTH_TOKEN = $null
+    }
+    $savedEnvironment = @{}
     $script:CcxExitCode = 1
-    try {
-        $process.StartInfo = $StartInfo
-        if (-not $process.Start()) { throw 'Claudish failed to start.' }
-        $started = $true
 
-        $stderrTask = if ($StartInfo.RedirectStandardError) { $process.StandardError.ReadToEndAsync() }
-        if ($StartInfo.RedirectStandardOutput) {
-            while ($null -ne ($line = $process.StandardOutput.ReadLine())) {
-                Write-Output $line
-            }
+    try {
+        foreach ($name in $environment.Keys) {
+            $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+            [Environment]::SetEnvironmentVariable($name, $environment[$name], 'Process')
         }
-        $process.WaitForExit()
-        if ($stderrTask) {
-            $stderr = $stderrTask.GetAwaiter().GetResult()
-            if ($stderr) { [Console]::Error.Write($stderr) }
-        }
-        $script:CcxExitCode = $process.ExitCode
+        $PSNativeCommandUseErrorActionPreference = $false
+        & $BunPath @ClaudishArgs
+        $script:CcxExitCode = $LASTEXITCODE
     } finally {
-        if ($started -and -not $process.HasExited) { Stop-CcxProcessTree -Process $process }
-        $process.Dispose()
+        foreach ($name in $environment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
+        }
     }
 }
 
@@ -137,7 +105,6 @@ function Invoke-Ccx {
     param([string[]]$Arguments = @())
 
     $parsed = Split-CcxArguments -Arguments $Arguments
-    $interactive = Test-CcxInteractive -ClaudeArgs $parsed.ClaudeArgs
     $bun = Get-Command bun -CommandType Application -ErrorAction SilentlyContinue
     if (-not $bun) { throw 'Required command not found: bun' }
 
@@ -146,15 +113,14 @@ function Invoke-Ccx {
         throw "Claudish is not installed. Run 'bun install' in $PSScriptRoot."
     }
 
-    $openAIKey = Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json')
-    $startInfo = New-ClaudishStartInfo `
-        -BunPath $bun.Source `
+    $claudishArgs = @(Get-ClaudishArguments `
         -ClaudishPath $claudishPath `
         -Model $parsed.Model `
-        -ClaudeArgs $parsed.ClaudeArgs `
-        -OpenAIKey $openAIKey `
-        -Interactive $interactive
-    Invoke-ProcessStartInfo -StartInfo $startInfo
+        -ClaudeArgs $parsed.ClaudeArgs)
+    Invoke-CcxCommand `
+        -BunPath $bun.Source `
+        -ClaudishArgs $claudishArgs `
+        -OpenAIKey (Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json'))
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
