@@ -1,14 +1,20 @@
-# Claude Code with GPT-5.6 Sol
+# Claude Code with OpenAI models
 
-`ccx` is a personal PowerShell abbreviation for running Claude Code with OpenAI `gpt-5.6-sol` through a temporary local LiteLLM gateway.
+`ccx` runs Claude Code through the project-local Claudish package. It uses OpenAI `gpt-5.6-sol` by default.
 
 ## Requirements
 
 - PowerShell 7
-- `claude` on `PATH`
-- `uvx` on `PATH`
+- Bun 1.3.14
+- Claude Code installed on `PATH`
 - `OPENAI_API_KEY` in `~/.codex/auth.json`
-- API access to `gpt-5.6-sol`
+- API access to the selected OpenAI model
+
+Install the pinned dependencies once:
+
+```powershell
+bun install --frozen-lockfile
+```
 
 The PowerShell profile command is:
 
@@ -16,26 +22,34 @@ The PowerShell profile command is:
 function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 ```
 
-Open a new PowerShell session after adding or changing the profile.
-
 ## Usage
 
-Interactive:
+Use the default model:
 
 ```powershell
 ccx
-```
-
-Headless:
-
-```powershell
 ccx -p 'Reply with exactly: CCX_OK' --output-format text
 ```
 
-All normal Claude Code arguments are forwarded.
+Select another OpenAI model with either wrapper form:
 
-## How it works
+```powershell
+ccx --model gpt-5.6-terra
+ccx --model=gpt-5.6-luna -p 'Summarize this repository'
+```
 
-`ccx` reads the existing OpenAI key from Codex auth, starts LiteLLM on a temporary loopback port, points Claude Code at that gateway, and selects `gpt-5.6-sol`. Environment changes apply only to the invocation and are restored afterward. The gateway is stopped when Claude exits.
+`ccx` consumes `--model` only before the first `--`. The separator itself is removed, and every later argument is passed literally to Claude Code:
 
-LiteLLM output is written to `logs/`, which Git ignores. The OpenAI key and temporary gateway token are not written to configuration or logs.
+```powershell
+ccx --model gpt-5.6-sol -- --verbose
+```
+
+The pinned Claudish patch classifies mode from its actual stdout handle. Attached positional prompts, flags, and resume flows stay interactive; redirected output and explicit `-p` or `--print` stay headless. `--models-skip-update` also suppresses Claudish's package update check.
+
+PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
+
+Every invocation explicitly disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag directly before the passthrough separator. It temporarily sets the OpenAI key, official base URL, and Claudish isolation variables, removes inherited Anthropic credentials, and restores the parent environment afterward. The dependency patch removes the OpenAI key before Claude Code is spawned.
+
+`ccx` invokes the pinned local Claudish entry point directly with Bun. It does not start or manage a separate local gateway daemon.
+
+Claudish still creates session files under `~/.claudish`; version 7.15.0 may leave Windows `status-*.js` files behind.

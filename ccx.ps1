@@ -9,129 +9,118 @@ function Get-OpenAIKey {
     $auth.OPENAI_API_KEY
 }
 
-function New-GatewayToken {
-    "sk-ccx-$([guid]::NewGuid().ToString('N'))"
-}
+function Split-CcxArguments {
+    param([string[]]$Arguments = @())
 
-function Get-FreeTcpPort {
-    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-    try {
-        $listener.Start()
-        ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-    } finally {
-        $listener.Stop()
+    $model = 'gpt-5.6-sol'
+    $claudeArgs = [System.Collections.Generic.List[string]]::new()
+    $parseWrapperFlags = $true
+
+    for ($index = 0; $index -lt $Arguments.Count; $index++) {
+        $argument = $Arguments[$index]
+        if ($parseWrapperFlags -and $argument -eq '--') {
+            $parseWrapperFlags = $false
+            continue
+        }
+        if ($parseWrapperFlags -and $argument -eq '--model') {
+            if ($index + 1 -ge $Arguments.Count -or $Arguments[$index + 1] -eq '--') {
+                throw 'Missing value for --model.'
+            }
+            $model = $Arguments[++$index]
+            if ([string]::IsNullOrWhiteSpace($model)) { throw 'Model value for --model cannot be empty.' }
+            continue
+        }
+        if ($parseWrapperFlags -and $argument.StartsWith('--model=')) {
+            $model = $argument.Substring(8)
+            if ([string]::IsNullOrWhiteSpace($model)) { throw 'Model value for --model cannot be empty.' }
+            continue
+        }
+        $claudeArgs.Add($argument)
+    }
+
+    [pscustomobject]@{
+        Model = $model
+        ClaudeArgs = $claudeArgs.ToArray()
     }
 }
 
-function Stop-GatewayProcesses {
+function Get-ClaudishArguments {
     param(
-        [System.Diagnostics.Process]$Process,
-        [Parameter(Mandatory)][int]$Port,
-        [Parameter(Mandatory)][string]$ConfigPath
+        [Parameter(Mandatory)][string]$ClaudishPath,
+        [Parameter(Mandatory)][string]$Model,
+        [string[]]$ClaudeArgs = @()
     )
 
-    if ($Process -and -not $Process.HasExited) {
-        & taskkill.exe /PID $Process.Id /T /F 2>$null | Out-Null
-    }
+    $arguments = @(
+        $ClaudishPath,
+        '--model', "oai@$Model",
+        '--models-skip-update',
+        '--log-off',
+        '--log-diag', 'off',
+        '--no-auto-approve',
+        '--dangerously-skip-permissions'
+    )
+    $arguments += '--'
+    $arguments += $ClaudeArgs
+    $arguments
+}
 
-    $configPattern = [regex]::Escape($ConfigPath)
-    $portPattern = "--port(?:=|\s+)$Port(?:\s|$)"
-    Get-CimInstance Win32_Process |
-        Where-Object {
-            $_.ProcessId -ne $PID -and
-            $_.CommandLine -match 'litellm' -and
-            $_.CommandLine -match $configPattern -and
-            $_.CommandLine -match $portPattern
-        } |
-        ForEach-Object { & taskkill.exe /PID $_.ProcessId /T /F 2>$null | Out-Null }
+function Invoke-CcxCommand {
+    param(
+        [Parameter(Mandatory)][string]$BunPath,
+        [string[]]$ClaudishArgs = @(),
+        [Parameter(Mandatory)][string]$OpenAIKey
+    )
+
+    $environment = [ordered]@{
+        OPENAI_API_KEY = $OpenAIKey
+        OPENAI_BASE_URL = 'https://api.openai.com'
+        CLAUDISH_STATS = 'off'
+        CLAUDISH_TELEMETRY = '0'
+        ANTHROPIC_API_KEY = $null
+        ANTHROPIC_AUTH_TOKEN = $null
+    }
+    $savedEnvironment = @{}
+    $script:CcxExitCode = 1
+
+    try {
+        foreach ($name in $environment.Keys) {
+            $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+            [Environment]::SetEnvironmentVariable($name, $environment[$name], 'Process')
+        }
+        $PSNativeCommandUseErrorActionPreference = $false
+        & $BunPath @ClaudishArgs
+        $script:CcxExitCode = $LASTEXITCODE
+    } finally {
+        foreach ($name in $environment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
+        }
+    }
 }
 
 function Invoke-Ccx {
-    param([string[]]$ClaudeArgs)
+    param([string[]]$Arguments = @())
 
-    $root = $PSScriptRoot
-    $configPath = Join-Path $root 'litellm.yaml'
-    $authPath = Join-Path $HOME '.codex/auth.json'
-    $logsPath = Join-Path $root 'logs'
-    foreach ($command in 'claude', 'uvx') {
-        if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "Required command not found: $command" }
-    }
-    if (-not (Test-Path -LiteralPath $configPath)) { throw "LiteLLM config not found: $configPath" }
+    $parsed = Split-CcxArguments -Arguments $Arguments
+    $bun = Get-Command bun -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $bun) { throw 'Required command not found: bun' }
 
-    $openAIKey = Get-OpenAIKey -AuthPath $authPath
-    $gatewayToken = New-GatewayToken
-    $port = Get-FreeTcpPort
-    $baseUrl = "http://127.0.0.1:$port"
-    New-Item -ItemType Directory -Force -Path $logsPath | Out-Null
-    $logPath = Join-Path $logsPath "litellm-$((Get-Date).ToString('yyyyMMdd-HHmmss')).log"
-
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = (Get-Command uvx).Source
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    foreach ($argument in @('--python', '3.13', '--from', 'litellm[proxy]==1.92.0', 'litellm', '--config', $configPath, '--host', '127.0.0.1', '--port', [string]$port)) {
-        [void]$startInfo.ArgumentList.Add($argument)
-    }
-    $startInfo.Environment['OPENAI_API_KEY'] = $openAIKey
-    $startInfo.Environment['LITELLM_MASTER_KEY'] = $gatewayToken
-    $startInfo.Environment['PYTHONUTF8'] = '1'
-
-    $gateway = [System.Diagnostics.Process]::new()
-    $gateway.StartInfo = $startInfo
-    $savedEnvironment = @{}
-    $claudeEnvironment = @{
-        ANTHROPIC_BASE_URL = $baseUrl
-        ANTHROPIC_AUTH_TOKEN = $gatewayToken
-        ANTHROPIC_API_KEY = $null
-        ANTHROPIC_MODEL = 'gpt-5.6-sol'
-        ANTHROPIC_DEFAULT_OPUS_MODEL = 'gpt-5.6-sol'
-        ANTHROPIC_DEFAULT_SONNET_MODEL = 'gpt-5.6-sol'
-        ANTHROPIC_DEFAULT_HAIKU_MODEL = 'gpt-5.6-sol'
-        CLAUDE_CODE_SUBAGENT_MODEL = 'gpt-5.6-sol'
-        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = '1'
-        CLAUDE_CODE_DISABLE_THINKING = '1'
+    $claudishPath = Join-Path $PSScriptRoot 'node_modules/claudish/dist/index.js'
+    if (-not (Test-Path -LiteralPath $claudishPath)) {
+        throw "Claudish is not installed. Run 'bun install' in $PSScriptRoot."
     }
 
-    try {
-        if (-not $gateway.Start()) { throw 'LiteLLM failed to start' }
-        $stdout = $gateway.StandardOutput.ReadToEndAsync()
-        $stderr = $gateway.StandardError.ReadToEndAsync()
-
-        $ready = $false
-        for ($attempt = 0; $attempt -lt 120; $attempt++) {
-            if ($gateway.HasExited) { break }
-            try {
-                Invoke-RestMethod -Uri "$baseUrl/v1/models" -Headers @{ Authorization = "Bearer $gatewayToken" } -TimeoutSec 2 | Out-Null
-                $ready = $true
-                break
-            } catch {
-                Start-Sleep -Milliseconds 500
-            }
-        }
-        if (-not $ready) { throw "LiteLLM did not become ready. Log: $logPath" }
-
-        foreach ($name in $claudeEnvironment.Keys) {
-            $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
-            [Environment]::SetEnvironmentVariable($name, $claudeEnvironment[$name], 'Process')
-        }
-        & claude --dangerously-skip-permissions --model gpt-5.6-sol @ClaudeArgs
-        $script:CcxExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
-    } finally {
-        foreach ($name in $claudeEnvironment.Keys) {
-            [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
-        }
-        Stop-GatewayProcesses -Process $gateway -Port $port -ConfigPath $configPath
-        if ($stdout) { $stdout.GetAwaiter().GetResult() | Set-Content -LiteralPath $logPath }
-        if ($stderr) { $stderr.GetAwaiter().GetResult() | Add-Content -LiteralPath $logPath }
-        $openAIKey = $null
-        $gatewayToken = $null
-    }
+    $claudishArgs = @(Get-ClaudishArguments `
+        -ClaudishPath $claudishPath `
+        -Model $parsed.Model `
+        -ClaudeArgs $parsed.ClaudeArgs)
+    Invoke-CcxCommand `
+        -BunPath $bun.Source `
+        -ClaudishArgs $claudishArgs `
+        -OpenAIKey (Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json'))
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    $script:CcxExitCode = 1
-    Invoke-Ccx -ClaudeArgs $args
+    Invoke-Ccx -Arguments $args
     exit $script:CcxExitCode
 }
