@@ -1,66 +1,234 @@
 $ErrorActionPreference = 'Stop'
+
 $root = Split-Path $PSScriptRoot -Parent
-$configPath = Join-Path $root 'litellm.yaml'
-$gitignorePath = Join-Path $root '.gitignore'
+$launcherPath = Join-Path $root 'ccx.ps1'
+$failures = [System.Collections.Generic.List[string]]::new()
 
 function Assert-True([bool]$Condition, [string]$Message) {
-    if (-not $Condition) { throw "FAIL: $Message" }
+    if (-not $Condition) { throw $Message }
 }
 
-Assert-True (Test-Path $configPath) 'litellm.yaml exists'
-$config = Get-Content -Raw $configPath
-Assert-True ($config -match 'model_name:\s*gpt-5\.6-sol') 'public model name is mapped'
-Assert-True ($config -match 'model:\s*openai/gpt-5\.6-sol') 'OpenAI provider model is configured'
-Assert-True ($config -match 'api_key:\s*os\.environ/OPENAI_API_KEY') 'API key comes from the environment'
-Assert-True ($config -match 'master_key:\s*os\.environ/LITELLM_MASTER_KEY') 'gateway key comes from the environment'
-Assert-True ($config -notmatch 'sk-[A-Za-z0-9_-]{12,}') 'no key is persisted in YAML'
-Assert-True (Test-Path $gitignorePath) '.gitignore exists'
-Assert-True ((Get-Content -Raw $gitignorePath) -match '(?m)^logs/$') 'runtime logs are ignored'
+function Assert-Equal($Actual, $Expected, [string]$Message) {
+    if ($Actual -ne $Expected) { throw "$Message (expected '$Expected', got '$Actual')" }
+}
 
-$launcherPath = Join-Path $root 'ccx.ps1'
-Assert-True (Test-Path $launcherPath) 'ccx.ps1 exists'
-$launcher = Get-Content -Raw $launcherPath
-Assert-True ($launcher -match "Environment\['PYTHONUTF8'\]\s*=\s*'1'") 'LiteLLM child forces UTF-8 on Windows'
-Assert-True ($launcher -match 'ANTHROPIC_API_KEY\s*=\s*\$null') 'inherited Anthropic API key is cleared for Claude'
-Assert-True ($launcher -notmatch 'DISABLE_PROMPT_CACHING\s*=') 'prompt caching remains enabled'
+function Assert-Sequence([object[]]$Actual, [object[]]$Expected, [string]$Message) {
+    if ($Actual.Count -ne $Expected.Count) {
+        throw "$Message (expected $($Expected.Count) items, got $($Actual.Count))"
+    }
+    for ($index = 0; $index -lt $Expected.Count; $index++) {
+        if ($Actual[$index] -ne $Expected[$index]) {
+            throw "$Message (item $index expected '$($Expected[$index])', got '$($Actual[$index])')"
+        }
+    }
+}
+
+function Assert-Throws([scriptblock]$Action, [string]$ExpectedMessage, [string]$Message) {
+    try {
+        & $Action
+    } catch {
+        if ($_.Exception.Message -eq $ExpectedMessage) { return }
+        throw "$Message (expected '$ExpectedMessage', got '$($_.Exception.Message)')"
+    }
+    throw "$Message (no error was thrown)"
+}
+
+function Test-Case([string]$Name, [scriptblock]$Action) {
+    try {
+        & $Action
+        "PASS: $Name"
+    } catch {
+        $failures.Add("FAIL: $Name - $($_.Exception.Message)")
+    }
+}
+
 . $launcherPath
 
-$testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-test-$([guid]::NewGuid().ToString('N'))"
-New-Item -ItemType Directory -Path $testDrive | Out-Null
-try {
-    $fakeAuth = Join-Path $testDrive 'auth.json'
-    Set-Content -LiteralPath $fakeAuth -Value '{"OPENAI_API_KEY":"fake-openai-key"}'
-    Assert-True ((Get-OpenAIKey -AuthPath $fakeAuth) -eq 'fake-openai-key') 'key is read from auth JSON'
-
-    Set-Content -LiteralPath $fakeAuth -Value '{"auth_mode":"chatgpt"}'
-    $missingKeyFailed = $false
-    try { Get-OpenAIKey -AuthPath $fakeAuth } catch { $missingKeyFailed = $_.Exception.Message -match 'OPENAI_API_KEY' }
-    Assert-True $missingKeyFailed 'missing key produces a precise error'
-} finally {
-    Remove-Item -LiteralPath $testDrive -Recurse -Force
+Test-Case 'default model and all ordinary arguments are preserved' {
+    $result = Split-CcxArguments -Arguments @('-p', 'hello world', '--output-format', 'text')
+    Assert-Equal $result.Model 'gpt-5.6-sol' 'default model'
+    Assert-Sequence @($result.ClaudeArgs) @('-p', 'hello world', '--output-format', 'text') 'Claude arguments'
 }
 
-$token = New-GatewayToken
-Assert-True ($token -match '^sk-ccx-[a-f0-9]{32}$') 'gateway token has the required prefix and entropy'
-
-$port = Get-FreeTcpPort
-Assert-True ($port -ge 1024 -and $port -le 65535) 'ephemeral port is valid'
-
-$cleanupPort = Get-FreeTcpPort
-$cleanupProcess = Start-Process python -ArgumentList @(
-    '-c',
-    "import time; marker='litellm'; time.sleep(30)",
-    '--config',
-    $configPath,
-    '--port',
-    [string]$cleanupPort
-) -PassThru -WindowStyle Hidden
-try {
-    Start-Sleep -Milliseconds 300
-    Stop-GatewayProcesses -Process $null -Port $cleanupPort -ConfigPath $configPath
-    Assert-True ($cleanupProcess.WaitForExit(5000)) 'orphaned gateway process is terminated by config and port'
-} finally {
-    if (-not $cleanupProcess.HasExited) { & taskkill.exe /PID $cleanupProcess.Id /T /F 2>$null | Out-Null }
+Test-Case 'separate model flag is consumed' {
+    $result = Split-CcxArguments -Arguments @('-p', 'prompt', '--model', 'gpt-test', '--verbose')
+    Assert-Equal $result.Model 'gpt-test' 'selected model'
+    Assert-Sequence @($result.ClaudeArgs) @('-p', 'prompt', '--verbose') 'Claude arguments'
 }
 
-'PASS: gateway configuration'
+Test-Case 'equals model flag is consumed' {
+    $result = Split-CcxArguments -Arguments @('--model=gpt-test', '--verbose')
+    Assert-Equal $result.Model 'gpt-test' 'selected model'
+    Assert-Sequence @($result.ClaudeArgs) @('--verbose') 'Claude arguments'
+}
+
+Test-Case 'separator ends wrapper parsing and is not forwarded' {
+    $result = Split-CcxArguments -Arguments @('--model', 'wrapper-model', '-p', 'prompt', '--', '--model', 'literal-model', '--flag=value')
+    Assert-Equal $result.Model 'wrapper-model' 'wrapper model'
+    Assert-Sequence @($result.ClaudeArgs) @('-p', 'prompt', '--model', 'literal-model', '--flag=value') 'literal Claude arguments'
+}
+
+Test-Case 'missing separate model value is rejected precisely' {
+    Assert-Throws { Split-CcxArguments -Arguments @('--model') } 'Missing value for --model.' 'missing model error'
+}
+
+Test-Case 'separator cannot be a separate model value' {
+    Assert-Throws { Split-CcxArguments -Arguments @('--model', '--') } 'Missing value for --model.' 'separator model error'
+}
+
+Test-Case 'empty separate model value is rejected precisely' {
+    Assert-Throws { Split-CcxArguments -Arguments @('--model', '') } 'Model value for --model cannot be empty.' 'empty model error'
+}
+
+Test-Case 'empty equals model value is rejected precisely' {
+    Assert-Throws { Split-CcxArguments -Arguments @('--model=') } 'Model value for --model cannot be empty.' 'empty equals model error'
+}
+
+Test-Case 'auth reader returns a fake key and rejects a missing key' {
+    $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-test-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $testDrive | Out-Null
+    try {
+        $fakeAuth = Join-Path $testDrive 'auth.json'
+        Set-Content -LiteralPath $fakeAuth -Value '{"OPENAI_API_KEY":"fake-openai-key"}'
+        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth) 'fake-openai-key' 'fake key'
+
+        Set-Content -LiteralPath $fakeAuth -Value '{"auth_mode":"chatgpt"}'
+        Assert-Throws { Get-OpenAIKey -AuthPath $fakeAuth } "OPENAI_API_KEY is missing from $fakeAuth" 'missing key error'
+    } finally {
+        Remove-Item -LiteralPath $testDrive -Recurse -Force
+    }
+}
+
+Test-Case 'Claudish start info has exact arguments and isolated environment' {
+    $oldOpenAIKey = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')
+    $oldOpenAIBaseUrl = [Environment]::GetEnvironmentVariable('OPENAI_BASE_URL', 'Process')
+    $oldAnthropicKey = [Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'Process')
+    $oldAnthropicToken = [Environment]::GetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('OPENAI_API_KEY', 'parent-openai-key', 'Process')
+        [Environment]::SetEnvironmentVariable('OPENAI_BASE_URL', 'https://parent.invalid', 'Process')
+        [Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', 'parent-anthropic-key', 'Process')
+        [Environment]::SetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', 'parent-anthropic-token', 'Process')
+
+        $startInfo = New-ClaudishStartInfo `
+            -BunPath 'C:\fake\bun.exe' `
+            -ClaudishPath 'C:\fake\node_modules\claudish\dist\index.js' `
+            -Model 'gpt-test' `
+            -ClaudeArgs @('-p', 'hello world', '--output-format=text') `
+            -OpenAIKey 'fake-openai-key'
+
+        Assert-Equal $startInfo.FileName 'C:\fake\bun.exe' 'Bun executable'
+        Assert-Sequence @($startInfo.ArgumentList) @(
+            'C:\fake\node_modules\claudish\dist\index.js',
+            '--model', 'oai@gpt-test',
+            '--models-skip-update',
+            '--log-off',
+            '--log-diag', 'off',
+            '--no-auto-approve',
+            '--dangerously-skip-permissions',
+            '--',
+            '-p', 'hello world', '--output-format=text'
+        ) 'Claudish arguments'
+        Assert-True (-not $startInfo.UseShellExecute) 'shell execution is disabled'
+        Assert-True (-not $startInfo.RedirectStandardInput) 'standard input is inherited'
+        Assert-True (-not $startInfo.RedirectStandardOutput) 'standard output is inherited'
+        Assert-True (-not $startInfo.RedirectStandardError) 'standard error is inherited'
+        Assert-True (-not $startInfo.CreateNoWindow) 'the inherited console is retained'
+        Assert-Equal $startInfo.Environment['OPENAI_API_KEY'] 'fake-openai-key' 'child OpenAI key'
+        Assert-Equal $startInfo.Environment['OPENAI_BASE_URL'] 'https://api.openai.com' 'child OpenAI base URL'
+        Assert-Equal $startInfo.Environment['CLAUDISH_STATS'] 'off' 'child usage stats setting'
+        Assert-True (-not $startInfo.Environment.ContainsKey('ANTHROPIC_API_KEY')) 'child Anthropic API key is removed'
+        Assert-True (-not $startInfo.Environment.ContainsKey('ANTHROPIC_AUTH_TOKEN')) 'child Anthropic auth token is removed'
+        Assert-True (-not (@($startInfo.ArgumentList) -contains 'fake-openai-key')) 'OpenAI key is absent from arguments'
+        Assert-Equal ([Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')) 'parent-openai-key' 'parent OpenAI key'
+        Assert-Equal ([Environment]::GetEnvironmentVariable('OPENAI_BASE_URL', 'Process')) 'https://parent.invalid' 'parent OpenAI base URL'
+        Assert-Equal ([Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'Process')) 'parent-anthropic-key' 'parent Anthropic key'
+        Assert-Equal ([Environment]::GetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', 'Process')) 'parent-anthropic-token' 'parent Anthropic token'
+    } finally {
+        [Environment]::SetEnvironmentVariable('OPENAI_API_KEY', $oldOpenAIKey, 'Process')
+        [Environment]::SetEnvironmentVariable('OPENAI_BASE_URL', $oldOpenAIBaseUrl, 'Process')
+        [Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', $oldAnthropicKey, 'Process')
+        [Environment]::SetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', $oldAnthropicToken, 'Process')
+    }
+}
+
+Test-Case 'real Claudish keeps an empty ccx invocation interactive' {
+    $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-claudish-test-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $testDrive | Out-Null
+    try {
+        $fakeClaude = Join-Path $testDrive 'claude.cmd'
+        $capturePath = Join-Path $testDrive 'claude-args.txt'
+        Set-Content -LiteralPath $fakeClaude -Encoding ascii -Value @'
+@echo off
+:capture
+if "%~1"=="" goto done
+>>"%CCX_CAPTURE_PATH%" echo(%~1
+shift
+goto capture
+:done
+exit /b 0
+'@
+
+        $startInfo = New-ClaudishStartInfo `
+            -BunPath (Get-Command bun -CommandType Application).Source `
+            -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
+            -Model 'gpt-test' `
+            -ClaudeArgs @() `
+            -OpenAIKey 'fake-openai-key'
+        $startInfo.Environment['CLAUDE_PATH'] = $fakeClaude
+        $startInfo.Environment['CCX_CAPTURE_PATH'] = $capturePath
+        $startInfo.Environment['HOME'] = $testDrive
+        $startInfo.Environment['USERPROFILE'] = $testDrive
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+
+        Assert-Equal (Invoke-ProcessStartInfo -StartInfo $startInfo) 0 'Claudish smoke exit code'
+        $capturedArgs = @(Get-Content -LiteralPath $capturePath)
+        Assert-True ($capturedArgs -contains '--dangerously-skip-permissions') 'Claude receives auto approval'
+        Assert-True ($capturedArgs -notcontains '-p') 'Claudish does not force print mode'
+    } finally {
+        Remove-Item -LiteralPath $testDrive -Recurse -Force
+    }
+}
+
+Test-Case 'child process exit code is returned exactly' {
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = Join-Path $PSHOME 'pwsh.exe'
+    $startInfo.UseShellExecute = $false
+    foreach ($argument in @('-NoProfile', '-Command', 'exit 37')) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    Assert-Equal (Invoke-ProcessStartInfo -StartInfo $startInfo) 37 'child exit code'
+}
+
+Test-Case 'dependency versions are pinned exactly' {
+    $packagePath = Join-Path $root 'package.json'
+    Assert-True (Test-Path -LiteralPath $packagePath) 'package.json exists'
+    $package = Get-Content -Raw -LiteralPath $packagePath | ConvertFrom-Json
+    Assert-Equal $package.packageManager 'bun@1.3.14' 'Bun pin'
+    Assert-Equal $package.dependencies.claudish '7.15.0' 'Claudish pin'
+    Assert-Equal @($package.dependencies.PSObject.Properties).Count 1 'dependency count'
+    Assert-True (Test-Path -LiteralPath (Join-Path $root 'bun.lock')) 'bun.lock exists'
+}
+
+Test-Case 'LiteLLM artifacts are absent' {
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'litellm.yaml'))) 'litellm.yaml is removed'
+    $gitignorePath = Join-Path $root '.gitignore'
+    Assert-True (Test-Path -LiteralPath $gitignorePath) '.gitignore exists'
+    $ignoreLines = @(Get-Content -LiteralPath $gitignorePath)
+    Assert-True ($ignoreLines -contains 'node_modules/') 'dependencies are ignored'
+    Assert-True ($ignoreLines -notcontains 'logs/') 'obsolete logs ignore is removed'
+    $logFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'logs') -File -ErrorAction SilentlyContinue)
+    Assert-Equal $logFiles.Count 0 'obsolete runtime logs are removed'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'docs/superpowers/specs/2026-07-14-claude-code-openai-gateway-design.md'))) 'obsolete gateway design is removed'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'docs/superpowers/plans/2026-07-14-claude-code-openai-gateway.md'))) 'obsolete gateway plan is removed'
+    $launcher = Get-Content -Raw -LiteralPath $launcherPath
+    Assert-True ($launcher -notmatch '(?i)litellm|bunx|uvx|Get-FreeTcpPort|Stop-GatewayProcesses') 'launcher contains no gateway code'
+}
+
+if ($failures.Count) {
+    $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
+    throw "$($failures.Count) launcher contract test(s) failed."
+}
+
+'PASS: Claudish launcher contract'

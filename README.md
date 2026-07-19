@@ -1,14 +1,20 @@
-# Claude Code with GPT-5.6 Sol
+# Claude Code with OpenAI models
 
-`ccx` is a personal PowerShell abbreviation for running Claude Code with OpenAI `gpt-5.6-sol` through a temporary local LiteLLM gateway.
+`ccx` runs Claude Code through the project-local Claudish package. It uses OpenAI `gpt-5.6-sol` by default.
 
 ## Requirements
 
 - PowerShell 7
-- `claude` on `PATH`
-- `uvx` on `PATH`
+- Bun 1.3.14
+- Claude Code installed on `PATH`
 - `OPENAI_API_KEY` in `~/.codex/auth.json`
-- API access to `gpt-5.6-sol`
+- API access to the selected OpenAI model
+
+Install the pinned dependencies once:
+
+```powershell
+bun install --frozen-lockfile
+```
 
 The PowerShell profile command is:
 
@@ -16,26 +22,30 @@ The PowerShell profile command is:
 function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 ```
 
-Open a new PowerShell session after adding or changing the profile.
-
 ## Usage
 
-Interactive:
+Use the default model:
 
 ```powershell
 ccx
-```
-
-Headless:
-
-```powershell
 ccx -p 'Reply with exactly: CCX_OK' --output-format text
 ```
 
-All normal Claude Code arguments are forwarded.
+Select another OpenAI model with either wrapper form:
 
-## How it works
+```powershell
+ccx --model gpt-5.6-sol
+ccx --model=gpt-5.6-sol -p 'Summarize this repository'
+```
 
-`ccx` reads the existing OpenAI key from Codex auth, starts LiteLLM on a temporary loopback port, points Claude Code at that gateway, and selects `gpt-5.6-sol`. Environment changes apply only to the invocation and are restored afterward. The gateway is stopped when Claude exits.
+`ccx` consumes `--model` only before the first `--`. The separator itself is removed, and every later argument is passed literally to Claude Code:
 
-LiteLLM output is written to `logs/`, which Git ignores. The OpenAI key and temporary gateway token are not written to configuration or logs.
+```powershell
+ccx --model gpt-5.6-sol -- --verbose
+```
+
+Every invocation explicitly disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag directly, before the passthrough separator, so plain `ccx` remains interactive. It also disables Claudish usage stats, logs, and diagnostics and skips model-catalog updates. The OpenAI key and official base URL exist only in the Claudish child environment. Inherited Anthropic credentials are removed from that child without changing the parent PowerShell environment.
+
+`ccx` invokes the pinned local Claudish entry point directly with Bun. It does not start or manage a separate local gateway daemon.
+
+Claudish still creates session files under `~/.claudish`; version 7.15.0 may leave Windows `status-*.js` files behind.
