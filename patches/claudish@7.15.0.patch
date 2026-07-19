@@ -28,7 +28,15 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..f6a3e0c695eb9ac0c4f199ce0c29bf8a
    delete env.CLAUDECODE;
    if (config3.monitor) {
      delete env.ANTHROPIC_API_KEY;
-@@ -72585,7 +72586,7 @@ Team Status`);
+@@ -71563,6 +71564,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+       env.ANTHROPIC_AUTH_TOKEN = process.env.ANTHROPIC_AUTH_TOKEN || "placeholder-token-not-used-proxy-handles-auth";
+     }
+   }
++  delete env.ANTHROPIC_API_KEY;
+   const log2 = (message) => {
+     if (!config3.quiet) {
+       if (config3.interactive) {
+@@ -72585,7 +72587,7 @@ Team Status`);
          console.log(`[claudish] Debug log: ${logFile}`);
        }
      }

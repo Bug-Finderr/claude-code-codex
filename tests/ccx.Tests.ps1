@@ -217,7 +217,7 @@ Test-Case 'missing native command restores environment and retains failure exit'
     }
 }
 
-Test-Case 'patched real Claudish keeps key from fake Claude' {
+Test-Case 'patched real Claudish filters Claude child auth environment' {
     $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-claudish-test-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $testDrive | Out-Null
     $names = @('CLAUDE_PATH', 'HOME', 'USERPROFILE', 'LOCALAPPDATA')
@@ -228,9 +228,19 @@ Test-Case 'patched real Claudish keeps key from fake Claude' {
         Set-Content -LiteralPath $fakeClaude -Encoding ascii -Value @'
 @echo off
 if defined OPENAI_API_KEY (
-  >"%CCX_ENV_CAPTURE_PATH%" echo(present
+  >"%CCX_ENV_CAPTURE_PATH%" echo(openai-present
 ) else (
-  >"%CCX_ENV_CAPTURE_PATH%" echo(absent
+  >"%CCX_ENV_CAPTURE_PATH%" echo(openai-absent
+)
+if defined ANTHROPIC_API_KEY (
+  >>"%CCX_ENV_CAPTURE_PATH%" echo(anthropic-key-present
+) else (
+  >>"%CCX_ENV_CAPTURE_PATH%" echo(anthropic-key-absent
+)
+if defined ANTHROPIC_AUTH_TOKEN (
+  >>"%CCX_ENV_CAPTURE_PATH%" echo(anthropic-token-present
+) else (
+  >>"%CCX_ENV_CAPTURE_PATH%" echo(anthropic-token-absent
 )
 exit /b 0
 '@
@@ -255,7 +265,11 @@ exit /b 0
         }
         Assert-Equal $script:CcxExitCode 0 'Claudish smoke exit code'
         Assert-Equal $output.Count 0 'Claudish smoke stdout'
-        Assert-Equal (Get-Content -Raw -LiteralPath $environmentCapturePath).Trim() 'absent' 'Claude OpenAI key state'
+        Assert-Sequence @(Get-Content -LiteralPath $environmentCapturePath) @(
+            'openai-absent',
+            'anthropic-key-absent',
+            'anthropic-token-present'
+        ) 'Claude child auth environment'
     } finally {
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
         Remove-Item -LiteralPath $testDrive -Recurse -Force
@@ -328,6 +342,7 @@ Test-Case 'dependency patch and artifact contract is minimal' {
         '+      if (!process.stdout.isTTY || rest.includes("-p") || rest.includes("--print"))',
         '+    config3.interactive = Boolean(process.stdout.isTTY);',
         '+  delete env.OPENAI_API_KEY;',
+        '+  delete env.ANTHROPIC_API_KEY;',
         '+    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {'
     ) 'patch additions'
     Assert-Sequence $removed @(
