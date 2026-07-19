@@ -3,5 +3,8 @@
   "packageManager": "bun@1.3.14",
   "dependencies": {
     "claudish": "7.15.0"
+  },
+  "patchedDependencies": {
+    "claudish@7.15.0": "patches/claudish@7.15.0.patch"
   }
 }

@@ -88,6 +88,7 @@ function New-ClaudishStartInfo {
     $startInfo.Environment['OPENAI_API_KEY'] = $OpenAIKey
     $startInfo.Environment['OPENAI_BASE_URL'] = 'https://api.openai.com'
     $startInfo.Environment['CLAUDISH_STATS'] = 'off'
+    $startInfo.Environment['CLAUDISH_TELEMETRY'] = '0'
     [void]$startInfo.Environment.Remove('ANTHROPIC_API_KEY')
     [void]$startInfo.Environment.Remove('ANTHROPIC_AUTH_TOKEN')
     $startInfo

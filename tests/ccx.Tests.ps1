@@ -50,8 +50,14 @@ function Invoke-ClaudishSmoke([string[]]$ClaudeArgs, [bool]$OutputRedirected) {
     try {
         $fakeClaude = Join-Path $testDrive 'claude.cmd'
         $capturePath = Join-Path $testDrive 'claude-args.txt'
+        $environmentCapturePath = Join-Path $testDrive 'claude-env.txt'
         Set-Content -LiteralPath $fakeClaude -Encoding ascii -Value @'
 @echo off
+if defined OPENAI_API_KEY (
+  >"%CCX_ENV_CAPTURE_PATH%" echo(present
+) else (
+  >"%CCX_ENV_CAPTURE_PATH%" echo(absent
+)
 :capture
 if "%~1"=="" goto done
 >>"%CCX_CAPTURE_PATH%" echo(%~1
@@ -71,6 +77,7 @@ exit /b 0
             -Interactive $interactive
         $startInfo.Environment['CLAUDE_PATH'] = $fakeClaude
         $startInfo.Environment['CCX_CAPTURE_PATH'] = $capturePath
+        $startInfo.Environment['CCX_ENV_CAPTURE_PATH'] = $environmentCapturePath
         $startInfo.Environment['HOME'] = $testDrive
         $startInfo.Environment['USERPROFILE'] = $testDrive
         $startInfo.Environment['LOCALAPPDATA'] = $testDrive
@@ -83,6 +90,7 @@ exit /b 0
             Interactive = $interactive
             StartArgs = @($startInfo.ArgumentList)
             ClaudeArgs = @(Get-Content -LiteralPath $capturePath)
+            OpenAIKeyPresent = (Get-Content -Raw -LiteralPath $environmentCapturePath).Trim() -eq 'present'
             UpdateCacheExists = Test-Path -LiteralPath (Join-Path $testDrive 'claudish/update-check.json')
         }
     } finally {
@@ -184,6 +192,7 @@ Test-Case 'Claudish start info has exact arguments and isolated environment' {
         Assert-Equal $startInfo.Environment['OPENAI_API_KEY'] 'fake-openai-key' 'child OpenAI key'
         Assert-Equal $startInfo.Environment['OPENAI_BASE_URL'] 'https://api.openai.com' 'child OpenAI base URL'
         Assert-Equal $startInfo.Environment['CLAUDISH_STATS'] 'off' 'child usage stats setting'
+        Assert-Equal $startInfo.Environment['CLAUDISH_TELEMETRY'] '0' 'child telemetry setting'
         Assert-True (-not $startInfo.Environment.ContainsKey('ANTHROPIC_API_KEY')) 'child Anthropic API key is removed'
         Assert-True (-not $startInfo.Environment.ContainsKey('ANTHROPIC_AUTH_TOKEN')) 'child Anthropic auth token is removed'
         Assert-True (-not (@($startInfo.ArgumentList) -contains 'fake-openai-key')) 'OpenAI key is absent from arguments'
@@ -208,6 +217,7 @@ Test-Case 'real Claudish keeps an empty attached invocation interactive without 
     Assert-True ($result.ClaudeArgs -contains '--dangerously-skip-permissions') 'Claude receives auto approval'
     Assert-True ($result.ClaudeArgs -notcontains '-p') 'Claudish does not force print mode'
     Assert-True ($result.ClaudeArgs -notcontains '--output-format') 'Claude JSON output is not forced'
+    Assert-True (-not $result.OpenAIKeyPresent) 'Claude descendant does not inherit the OpenAI key'
     Assert-True (-not $result.UpdateCacheExists) 'update-check cache is absent'
 }
 
@@ -280,6 +290,8 @@ Test-Case 'dependency versions are pinned exactly' {
     Assert-Equal $package.packageManager 'bun@1.3.14' 'Bun pin'
     Assert-Equal $package.dependencies.claudish '7.15.0' 'Claudish pin'
     Assert-Equal @($package.dependencies.PSObject.Properties).Count 1 'dependency count'
+    Assert-Equal $package.patchedDependencies.'claudish@7.15.0' 'patches/claudish@7.15.0.patch' 'Claudish patch registration'
+    Assert-True (Test-Path -LiteralPath (Join-Path $root 'patches/claudish@7.15.0.patch')) 'Claudish patch exists'
     Assert-True (Test-Path -LiteralPath (Join-Path $root 'bun.lock')) 'bun.lock exists'
 }
 

@@ -1,0 +1,12 @@
+diff --git a/dist/index.js b/dist/index.js
+index 7ffebf33b292f567d33040cb4df0f1091d93784e..34ec2838f151e0c873b9227cf6cba129d59b91d2 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -71545,6 +71545,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+     [ENV.CLAUDISH_ACTIVE_MODEL_NAME]: modelDisplayName,
+     CLAUDISH_IS_LOCAL: isLocalModel2 ? "true" : "false"
+   };
++  delete env.OPENAI_API_KEY;
+   delete env.CLAUDECODE;
+   if (config3.monitor) {
+     delete env.ANTHROPIC_API_KEY;
