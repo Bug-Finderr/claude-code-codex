@@ -339,16 +339,25 @@ Test-Case 'dependency patch and artifact contract is minimal' {
     $added = @($patchLines | Where-Object { $_ -match '^\+(?!\+\+)' })
     $removed = @($patchLines | Where-Object { $_ -match '^-(?!--)' })
     Assert-Sequence $added @(
+        '+  if (!options.skipModelsUpdate) {',
+        '+    warmRecommendedModels().catch(() => {});',
+        '+    warmAllCatalogs(["openrouter"]).catch(() => {});',
+        '+  }',
         '+      if (!process.stdout.isTTY || rest.includes("-p") || rest.includes("--print"))',
         '+    config3.interactive = Boolean(process.stdout.isTTY);',
         '+  delete env.OPENAI_API_KEY;',
         '+  delete env.ANTHROPIC_API_KEY;',
-        '+    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {'
+        '+    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {',
+        '+      advisorCollector: cliConfig.advisorCollector,',
+        '+      skipModelsUpdate: cliConfig.skipModelsUpdate'
     ) 'patch additions'
     Assert-Sequence $removed @(
+        '-  warmRecommendedModels().catch(() => {});',
+        '-  warmAllCatalogs(["openrouter"]).catch(() => {});',
         '-      if (rest.length > 0)',
         '-    config3.interactive = true;',
-        '-    if (cliConfig.interactive && !cliConfig.jsonOutput) {'
+        '-    if (cliConfig.interactive && !cliConfig.jsonOutput) {',
+        '-      advisorCollector: cliConfig.advisorCollector'
     ) 'patch removals'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'litellm.yaml'))) 'LiteLLM config is absent'
     $launcher = Get-Content -Raw -LiteralPath $launcherPath
