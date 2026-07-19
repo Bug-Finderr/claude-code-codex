@@ -44,6 +44,52 @@ function Test-Case([string]$Name, [scriptblock]$Action) {
 
 . $launcherPath
 
+function Invoke-ClaudishSmoke([string[]]$ClaudeArgs, [bool]$OutputRedirected) {
+    $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-claudish-test-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $testDrive | Out-Null
+    try {
+        $fakeClaude = Join-Path $testDrive 'claude.cmd'
+        $capturePath = Join-Path $testDrive 'claude-args.txt'
+        Set-Content -LiteralPath $fakeClaude -Encoding ascii -Value @'
+@echo off
+:capture
+if "%~1"=="" goto done
+>>"%CCX_CAPTURE_PATH%" echo(%~1
+shift
+goto capture
+:done
+exit /b 0
+'@
+
+        $interactive = Test-CcxInteractive -ClaudeArgs $ClaudeArgs -OutputRedirected:$OutputRedirected
+        $startInfo = New-ClaudishStartInfo `
+            -BunPath (Get-Command bun -CommandType Application).Source `
+            -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
+            -Model 'gpt-test' `
+            -ClaudeArgs $ClaudeArgs `
+            -OpenAIKey 'fake-openai-key' `
+            -Interactive $interactive
+        $startInfo.Environment['CLAUDE_PATH'] = $fakeClaude
+        $startInfo.Environment['CCX_CAPTURE_PATH'] = $capturePath
+        $startInfo.Environment['HOME'] = $testDrive
+        $startInfo.Environment['USERPROFILE'] = $testDrive
+        $startInfo.Environment['LOCALAPPDATA'] = $testDrive
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+
+        $exitCode = Invoke-ProcessStartInfo -StartInfo $startInfo
+        [pscustomobject]@{
+            ExitCode = $exitCode
+            Interactive = $interactive
+            StartArgs = @($startInfo.ArgumentList)
+            ClaudeArgs = @(Get-Content -LiteralPath $capturePath)
+            UpdateCacheExists = Test-Path -LiteralPath (Join-Path $testDrive 'claudish/update-check.json')
+        }
+    } finally {
+        Remove-Item -LiteralPath $testDrive -Recurse -Force
+    }
+}
+
 Test-Case 'default model and all ordinary arguments are preserved' {
     $result = Split-CcxArguments -Arguments @('-p', 'hello world', '--output-format', 'text')
     Assert-Equal $result.Model 'gpt-5.6-sol' 'default model'
@@ -115,7 +161,8 @@ Test-Case 'Claudish start info has exact arguments and isolated environment' {
             -ClaudishPath 'C:\fake\node_modules\claudish\dist\index.js' `
             -Model 'gpt-test' `
             -ClaudeArgs @('-p', 'hello world', '--output-format=text') `
-            -OpenAIKey 'fake-openai-key'
+            -OpenAIKey 'fake-openai-key' `
+            -Interactive $false
 
         Assert-Equal $startInfo.FileName 'C:\fake\bun.exe' 'Bun executable'
         Assert-Sequence @($startInfo.ArgumentList) @(
@@ -152,43 +199,51 @@ Test-Case 'Claudish start info has exact arguments and isolated environment' {
     }
 }
 
-Test-Case 'real Claudish keeps an empty ccx invocation interactive' {
-    $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-claudish-test-$([guid]::NewGuid().ToString('N'))"
-    New-Item -ItemType Directory -Path $testDrive | Out-Null
-    try {
-        $fakeClaude = Join-Path $testDrive 'claude.cmd'
-        $capturePath = Join-Path $testDrive 'claude-args.txt'
-        Set-Content -LiteralPath $fakeClaude -Encoding ascii -Value @'
-@echo off
-:capture
-if "%~1"=="" goto done
->>"%CCX_CAPTURE_PATH%" echo(%~1
-shift
-goto capture
-:done
-exit /b 0
-'@
+Test-Case 'real Claudish keeps an empty attached invocation interactive without update cache' {
+    $result = Invoke-ClaudishSmoke -ClaudeArgs @() -OutputRedirected:$false
+    Assert-Equal $result.ExitCode 0 'Claudish smoke exit code'
+    Assert-True $result.Interactive 'invocation classification'
+    Assert-True ($result.StartArgs -contains '--interactive') 'explicit interactive flag'
+    Assert-True ($result.StartArgs -contains '--json') 'interactive update-check suppression'
+    Assert-True ($result.ClaudeArgs -contains '--dangerously-skip-permissions') 'Claude receives auto approval'
+    Assert-True ($result.ClaudeArgs -notcontains '-p') 'Claudish does not force print mode'
+    Assert-True ($result.ClaudeArgs -notcontains '--output-format') 'Claude JSON output is not forced'
+    Assert-True (-not $result.UpdateCacheExists) 'update-check cache is absent'
+}
 
-        $startInfo = New-ClaudishStartInfo `
-            -BunPath (Get-Command bun -CommandType Application).Source `
-            -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
-            -Model 'gpt-test' `
-            -ClaudeArgs @() `
-            -OpenAIKey 'fake-openai-key'
-        $startInfo.Environment['CLAUDE_PATH'] = $fakeClaude
-        $startInfo.Environment['CCX_CAPTURE_PATH'] = $capturePath
-        $startInfo.Environment['HOME'] = $testDrive
-        $startInfo.Environment['USERPROFILE'] = $testDrive
-        $startInfo.RedirectStandardOutput = $true
-        $startInfo.RedirectStandardError = $true
+Test-Case 'real Claudish keeps a flag-only attached invocation interactive' {
+    $result = Invoke-ClaudishSmoke -ClaudeArgs @('--verbose') -OutputRedirected:$false
+    Assert-True $result.Interactive 'invocation classification'
+    Assert-True ($result.ClaudeArgs -contains '--verbose') 'flag is forwarded'
+    Assert-True ($result.ClaudeArgs -notcontains '-p') 'Claudish does not force print mode'
+}
 
-        Assert-Equal (Invoke-ProcessStartInfo -StartInfo $startInfo) 0 'Claudish smoke exit code'
-        $capturedArgs = @(Get-Content -LiteralPath $capturePath)
-        Assert-True ($capturedArgs -contains '--dangerously-skip-permissions') 'Claude receives auto approval'
-        Assert-True ($capturedArgs -notcontains '-p') 'Claudish does not force print mode'
-    } finally {
-        Remove-Item -LiteralPath $testDrive -Recurse -Force
-    }
+Test-Case 'real Claudish keeps a positional attached invocation interactive' {
+    $result = Invoke-ClaudishSmoke -ClaudeArgs @('start-here') -OutputRedirected:$false
+    Assert-True $result.Interactive 'invocation classification'
+    Assert-True ($result.ClaudeArgs -contains 'start-here') 'prompt is forwarded'
+    Assert-True ($result.ClaudeArgs -notcontains '-p') 'Claudish does not force print mode'
+}
+
+Test-Case 'real Claudish keeps print invocation headless without forcing JSON' {
+    $result = Invoke-ClaudishSmoke -ClaudeArgs @('-p', 'print this') -OutputRedirected:$false
+    Assert-True (-not $result.Interactive) 'invocation classification'
+    Assert-Equal @($result.ClaudeArgs | Where-Object { $_ -eq '-p' }).Count 1 'print flag count'
+    Assert-True ($result.StartArgs -notcontains '--interactive') 'interactive flag is absent'
+    Assert-True ($result.StartArgs -notcontains '--json') 'JSON control flag is absent'
+    Assert-True ($result.ClaudeArgs -notcontains '--output-format') 'Claude JSON output is not forced'
+}
+
+Test-Case 'redirected stdout is classified as noninteractive' {
+    Assert-True (-not (Test-CcxInteractive -ClaudeArgs @() -OutputRedirected:$true)) 'redirected invocation classification'
+}
+
+Test-Case 'real Claudish keeps an empty redirected invocation headless' {
+    $result = Invoke-ClaudishSmoke -ClaudeArgs @() -OutputRedirected:$true
+    Assert-True (-not $result.Interactive) 'invocation classification'
+    Assert-True ($result.ClaudeArgs -contains '--print') 'print mode is explicit'
+    Assert-True ($result.StartArgs -notcontains '--interactive') 'interactive flag is absent'
+    Assert-True ($result.StartArgs -notcontains '--json') 'JSON control flag is absent'
 }
 
 Test-Case 'child process exit code is returned exactly' {
@@ -199,6 +254,23 @@ Test-Case 'child process exit code is returned exactly' {
         [void]$startInfo.ArgumentList.Add($argument)
     }
     Assert-Equal (Invoke-ProcessStartInfo -StartInfo $startInfo) 37 'child exit code'
+}
+
+Test-Case 'process-tree cleanup terminates only the exact child' {
+    $target = Start-Process (Join-Path $PSHOME 'pwsh.exe') -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
+    $sentinel = Start-Process (Join-Path $PSHOME 'pwsh.exe') -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
+    try {
+        Stop-CcxProcessTree -Process $target
+        Assert-True ($target.WaitForExit(5000)) 'target process exits'
+        Assert-True (-not $sentinel.HasExited) 'unrelated process remains running'
+    } finally {
+        foreach ($process in @($target, $sentinel)) {
+            if (-not $process.HasExited) {
+                & taskkill.exe /PID ([string]$process.Id) /T /F 2>$null | Out-Null
+            }
+            $process.Dispose()
+        }
+    }
 }
 
 Test-Case 'dependency versions are pinned exactly' {
