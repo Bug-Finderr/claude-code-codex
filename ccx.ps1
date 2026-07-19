@@ -66,6 +66,8 @@ function New-ClaudishStartInfo {
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $BunPath
     $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = -not $Interactive
+    $startInfo.RedirectStandardError = -not $Interactive
     $claudishArgs = @(
         $ClaudishPath,
         '--model', "oai@$Model",
@@ -107,12 +109,24 @@ function Invoke-ProcessStartInfo {
 
     $process = [System.Diagnostics.Process]::new()
     $started = $false
+    $script:CcxExitCode = 1
     try {
         $process.StartInfo = $StartInfo
         if (-not $process.Start()) { throw 'Claudish failed to start.' }
         $started = $true
+
+        $stderrTask = if ($StartInfo.RedirectStandardError) { $process.StandardError.ReadToEndAsync() }
+        if ($StartInfo.RedirectStandardOutput) {
+            while ($null -ne ($line = $process.StandardOutput.ReadLine())) {
+                Write-Output $line
+            }
+        }
         $process.WaitForExit()
-        $process.ExitCode
+        if ($stderrTask) {
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            if ($stderr) { [Console]::Error.Write($stderr) }
+        }
+        $script:CcxExitCode = $process.ExitCode
     } finally {
         if ($started -and -not $process.HasExited) { Stop-CcxProcessTree -Process $process }
         $process.Dispose()
@@ -144,6 +158,6 @@ function Invoke-Ccx {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    $exitCode = Invoke-Ccx -Arguments $args
-    exit $exitCode
+    Invoke-Ccx -Arguments $args
+    exit $script:CcxExitCode
 }

@@ -84,10 +84,20 @@ exit /b 0
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
 
-        $exitCode = Invoke-ProcessStartInfo -StartInfo $startInfo
+        $script:CcxExitCode = $null
+        $oldError = [Console]::Error
+        $capturedError = [System.IO.StringWriter]::new()
+        try {
+            [Console]::SetError($capturedError)
+            $processOutput = @(Invoke-ProcessStartInfo -StartInfo $startInfo)
+        } finally {
+            [Console]::SetError($oldError)
+        }
         [pscustomobject]@{
-            ExitCode = $exitCode
+            ExitCode = $script:CcxExitCode
             Interactive = $interactive
+            ProcessOutput = $processOutput
+            ProcessError = $capturedError.ToString()
             StartArgs = @($startInfo.ArgumentList)
             ClaudeArgs = @(Get-Content -LiteralPath $capturePath)
             OpenAIKeyPresent = (Get-Content -Raw -LiteralPath $environmentCapturePath).Trim() -eq 'present'
@@ -186,8 +196,8 @@ Test-Case 'Claudish start info has exact arguments and isolated environment' {
         ) 'Claudish arguments'
         Assert-True (-not $startInfo.UseShellExecute) 'shell execution is disabled'
         Assert-True (-not $startInfo.RedirectStandardInput) 'standard input is inherited'
-        Assert-True (-not $startInfo.RedirectStandardOutput) 'standard output is inherited'
-        Assert-True (-not $startInfo.RedirectStandardError) 'standard error is inherited'
+        Assert-True $startInfo.RedirectStandardOutput 'standard output is redirected'
+        Assert-True $startInfo.RedirectStandardError 'standard error is redirected'
         Assert-True (-not $startInfo.CreateNoWindow) 'the inherited console is retained'
         Assert-Equal $startInfo.Environment['OPENAI_API_KEY'] 'fake-openai-key' 'child OpenAI key'
         Assert-Equal $startInfo.Environment['OPENAI_BASE_URL'] 'https://api.openai.com' 'child OpenAI base URL'
@@ -206,6 +216,20 @@ Test-Case 'Claudish start info has exact arguments and isolated environment' {
         [Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', $oldAnthropicKey, 'Process')
         [Environment]::SetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', $oldAnthropicToken, 'Process')
     }
+}
+
+Test-Case 'interactive Claudish start info inherits all console streams' {
+    $startInfo = New-ClaudishStartInfo `
+        -BunPath 'C:\fake\bun.exe' `
+        -ClaudishPath 'C:\fake\node_modules\claudish\dist\index.js' `
+        -Model 'gpt-test' `
+        -ClaudeArgs @() `
+        -OpenAIKey 'fake-openai-key' `
+        -Interactive $true
+
+    Assert-True (-not $startInfo.RedirectStandardInput) 'standard input is inherited'
+    Assert-True (-not $startInfo.RedirectStandardOutput) 'standard output is inherited'
+    Assert-True (-not $startInfo.RedirectStandardError) 'standard error is inherited'
 }
 
 Test-Case 'real Claudish keeps an empty attached invocation interactive without update cache' {
@@ -263,7 +287,48 @@ Test-Case 'child process exit code is returned exactly' {
     foreach ($argument in @('-NoProfile', '-Command', 'exit 37')) {
         [void]$startInfo.ArgumentList.Add($argument)
     }
-    Assert-Equal (Invoke-ProcessStartInfo -StartInfo $startInfo) 37 'child exit code'
+    $script:CcxExitCode = $null
+    $output = @(Invoke-ProcessStartInfo -StartInfo $startInfo)
+    Assert-Equal $output.Count 0 'exit code is absent from stdout'
+    Assert-Equal $script:CcxExitCode 37 'child exit code'
+}
+
+Test-Case 'headless process streams stdout incrementally and preserves stderr' {
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = Join-Path $PSHOME 'pwsh.exe'
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @(
+        '-NoProfile',
+        '-Command',
+        '[Console]::Out.WriteLine("first"); Start-Sleep -Milliseconds 900; [Console]::Out.WriteLine("second"); [Console]::Error.WriteLine("native-stderr"); exit 23'
+    )) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    $oldError = [Console]::Error
+    $capturedError = [System.IO.StringWriter]::new()
+    $observed = [System.Collections.Generic.List[object]]::new()
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $script:CcxExitCode = $null
+    try {
+        [Console]::SetError($capturedError)
+        $output = @(Invoke-ProcessStartInfo -StartInfo $startInfo | ForEach-Object {
+            $observed.Add([pscustomobject]@{ Value = $_; At = $stopwatch.ElapsedMilliseconds })
+            $_
+        })
+    } finally {
+        $stopwatch.Stop()
+        [Console]::SetError($oldError)
+    }
+
+    Assert-Sequence $output @('first', 'second') 'headless stdout lines'
+    Assert-Equal $script:CcxExitCode 23 'nonzero child exit code'
+    Assert-True ($capturedError.ToString() -match 'native-stderr') 'native stderr is preserved'
+    Assert-Equal $observed.Count 2 'observed stdout line count'
+    Assert-True (($stopwatch.ElapsedMilliseconds - $observed[0].At) -gt 600) 'first line is observable before child exit'
+    $capturedError.Dispose()
 }
 
 Test-Case 'process-tree cleanup terminates only the exact child' {
