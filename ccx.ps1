@@ -60,9 +60,6 @@ function Get-ClaudishArguments {
         '--no-auto-approve',
         '--dangerously-skip-permissions'
     )
-    if ($ClaudeArgs -notcontains '-p' -and $ClaudeArgs -notcontains '--print') {
-        $arguments += '--interactive', '--json'
-    }
     $arguments += '--'
     $arguments += $ClaudeArgs
     $arguments

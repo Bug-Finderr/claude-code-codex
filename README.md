@@ -44,7 +44,7 @@ ccx --model=gpt-5.6-sol -p 'Summarize this repository'
 ccx --model gpt-5.6-sol -- --verbose
 ```
 
-Invocations without `-p` or `--print` stay interactive, including positional prompts, flags, and resume flows. Interactive runs suppress Claudish's package update check without forcing Claude JSON output.
+The pinned Claudish patch classifies mode from its actual stdout handle. Attached positional prompts, flags, and resume flows stay interactive; redirected output and explicit `-p` or `--print` stay headless. `--models-skip-update` also suppresses Claudish's package update check.
 
 PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
 

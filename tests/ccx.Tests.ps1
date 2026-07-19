@@ -44,15 +44,16 @@ function Test-Case([string]$Name, [scriptblock]$Action) {
 
 . $launcherPath
 
+$temporaryEnvironmentNames = @(
+    'OPENAI_API_KEY',
+    'OPENAI_BASE_URL',
+    'CLAUDISH_STATS',
+    'CLAUDISH_TELEMETRY',
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN'
+)
+
 function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
-    $names = @(
-        'OPENAI_API_KEY',
-        'OPENAI_BASE_URL',
-        'CLAUDISH_STATS',
-        'CLAUDISH_TELEMETRY',
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_AUTH_TOKEN'
-    )
     $original = @{}
     $parent = @{
         OPENAI_API_KEY = 'parent-openai-key'
@@ -64,7 +65,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
     }
     $savedNativePreference = $PSNativeCommandUseErrorActionPreference
     try {
-        foreach ($name in $names) {
+        foreach ($name in $temporaryEnvironmentNames) {
             $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
             [Environment]::SetEnvironmentVariable($name, $parent[$name], 'Process')
         }
@@ -84,12 +85,12 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
         Assert-Sequence $output @('True|True|True|True|True|True') 'translator environment'
         Assert-Equal $script:CcxExitCode $ExitCode 'child exit code'
         Assert-True $PSNativeCommandUseErrorActionPreference 'caller native error preference is unchanged'
-        foreach ($name in $names) {
+        foreach ($name in $temporaryEnvironmentNames) {
             Assert-Equal ([Environment]::GetEnvironmentVariable($name, 'Process')) $parent[$name] "restored $name"
         }
     } finally {
         $PSNativeCommandUseErrorActionPreference = $savedNativePreference
-        foreach ($name in $names) {
+        foreach ($name in $temporaryEnvironmentNames) {
             [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process')
         }
     }
@@ -137,26 +138,16 @@ Test-Case 'auth reader uses only the configured fake key' {
     }
 }
 
-Test-Case 'interactive Claudish arguments preserve attached modes' {
-    foreach ($claudeArgs in @(@(), @('--verbose'), @('start-here'), @('--resume'))) {
+Test-Case 'Claudish arguments defer all modes to the patched actual-handle classifier' {
+    foreach ($claudeArgs in @(@(), @('--verbose'), @('start-here'), @('--resume'), @('-p', 'prompt'), @('--print', 'prompt'))) {
         $arguments = @(Get-ClaudishArguments -ClaudishPath 'C:\fake\claudish.js' -Model 'gpt-test' -ClaudeArgs $claudeArgs)
-        Assert-True ($arguments -contains '--interactive') 'interactive control flag'
-        Assert-True ($arguments -contains '--json') 'update-check suppression flag'
+        Assert-True ($arguments -notcontains '--interactive') 'interactive control flag is absent'
+        Assert-True ($arguments -notcontains '--json') 'JSON control flag is absent'
         $dangerous = [Array]::IndexOf($arguments, '--dangerously-skip-permissions')
         $separator = [Array]::IndexOf($arguments, '--')
         Assert-True ($dangerous -lt $separator) 'auto approval precedes separator'
         $forwarded = if ($separator + 1 -lt $arguments.Count) { @($arguments[($separator + 1)..($arguments.Count - 1)]) } else { @() }
         Assert-Sequence $forwarded $claudeArgs 'post-separator Claude arguments'
-    }
-}
-
-Test-Case 'print Claudish arguments remain headless' {
-    foreach ($printFlag in @('-p', '--print')) {
-        $arguments = @(Get-ClaudishArguments -ClaudishPath 'C:\fake\claudish.js' -Model 'gpt-test' -ClaudeArgs @($printFlag, 'prompt'))
-        Assert-True ($arguments -notcontains '--interactive') 'interactive flag is absent'
-        Assert-True ($arguments -notcontains '--json') 'JSON flag is absent'
-        $separator = [Array]::IndexOf($arguments, '--')
-        Assert-Sequence @($arguments[($separator + 1)..($arguments.Count - 1)]) @($printFlag, 'prompt') 'headless Claude arguments'
     }
 }
 
@@ -195,6 +186,35 @@ Test-Case 'fake translator receives temporary environment restored after success
 
 Test-Case 'temporary environment is restored after nonzero exit' {
     Assert-EnvironmentRestoredAfterCommand -ExitCode 29
+}
+
+Test-Case 'missing native command restores environment and retains failure exit' {
+    $original = @{}
+    $parentValue = 'parent-before-missing-command'
+    try {
+        foreach ($name in $temporaryEnvironmentNames) {
+            $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+            [Environment]::SetEnvironmentVariable($name, $parentValue, 'Process')
+        }
+        $missingPath = Join-Path ([System.IO.Path]::GetTempPath()) "missing-bun-$([guid]::NewGuid().ToString('N')).exe"
+        Assert-True (-not (Test-Path -LiteralPath $missingPath)) 'missing command fixture is absent'
+        $script:CcxExitCode = 99
+        $failed = $false
+        try {
+            Invoke-CcxCommand -BunPath $missingPath -ClaudishArgs @() -OpenAIKey 'fake-openai-key'
+        } catch {
+            $failed = $true
+        }
+        Assert-True $failed 'missing command throws'
+        Assert-Equal $script:CcxExitCode 1 'missing command exit state'
+        foreach ($name in $temporaryEnvironmentNames) {
+            Assert-Equal ([Environment]::GetEnvironmentVariable($name, 'Process')) $parentValue "restored $name"
+        }
+    } finally {
+        foreach ($name in $temporaryEnvironmentNames) {
+            [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process')
+        }
+    }
 }
 
 Test-Case 'patched real Claudish keeps key from fake Claude' {
@@ -242,6 +262,60 @@ exit /b 0
     }
 }
 
+Test-Case 'real Claudish passes redirected stdout handles to fake Claude under assignment and pipeline' {
+    $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-handle-test-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $testDrive | Out-Null
+    $names = @('CLAUDE_PATH', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'CCX_POWERSHELL_PATH')
+    $saved = @{}
+    try {
+        $fakeClaude = Join-Path $testDrive 'claude.cmd'
+        Set-Content -LiteralPath $fakeClaude -Encoding ascii -Value @'
+@echo off
+"%CCX_POWERSHELL_PATH%" -NoProfile -Command "[Console]::IsOutputRedirected"
+exit /b %ERRORLEVEL%
+'@
+        foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
+        $env:CLAUDE_PATH = $fakeClaude
+        $env:HOME = $testDrive
+        $env:USERPROFILE = $testDrive
+        $env:LOCALAPPDATA = $testDrive
+        $env:CCX_POWERSHELL_PATH = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+
+        $claudishArgs = @(Get-ClaudishArguments `
+            -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
+            -Model 'gpt-test' `
+            -ClaudeArgs @('--verbose'))
+        $assigned = @(Invoke-CcxCommand `
+            -BunPath (Get-Command bun -CommandType Application).Source `
+            -ClaudishArgs $claudishArgs `
+            -OpenAIKey 'fake-openai-key')
+        Assert-Equal $script:CcxExitCode 0 'assignment exit code'
+        Assert-Sequence $assigned @('True') 'assignment capture'
+
+        $emptyArgs = @(Get-ClaudishArguments `
+            -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
+            -Model 'gpt-test' `
+            -ClaudeArgs @())
+        $emptyAssigned = @(Invoke-CcxCommand `
+            -BunPath (Get-Command bun -CommandType Application).Source `
+            -ClaudishArgs $emptyArgs `
+            -OpenAIKey 'fake-openai-key' 2>$null)
+        Assert-Sequence $emptyAssigned @('True') 'empty assignment capture'
+        Assert-Equal $script:CcxExitCode 0 'empty assignment exit code'
+
+        $piped = @(Invoke-CcxCommand `
+            -BunPath (Get-Command bun -CommandType Application).Source `
+            -ClaudishArgs $claudishArgs `
+            -OpenAIKey 'fake-openai-key' 2>$null | ForEach-Object { "pipe:$_" })
+        Assert-Sequence $piped @('pipe:True') 'pipeline capture'
+        Assert-Equal $script:CcxExitCode 0 'pipeline exit code'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $testDrive 'claudish/update-check.json'))) 'update-check cache is absent'
+    } finally {
+        foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
+        Remove-Item -LiteralPath $testDrive -Recurse -Force
+    }
+}
+
 Test-Case 'dependency patch and artifact contract is minimal' {
     $package = Get-Content -Raw -LiteralPath (Join-Path $root 'package.json') | ConvertFrom-Json
     Assert-Equal $package.packageManager 'bun@1.3.14' 'Bun pin'
@@ -250,8 +324,17 @@ Test-Case 'dependency patch and artifact contract is minimal' {
     $patchLines = Get-Content -LiteralPath (Join-Path $root 'patches/claudish@7.15.0.patch')
     $added = @($patchLines | Where-Object { $_ -match '^\+(?!\+\+)' })
     $removed = @($patchLines | Where-Object { $_ -match '^-(?!--)' })
-    Assert-Sequence $added @('+  delete env.OPENAI_API_KEY;') 'patch additions'
-    Assert-Equal $removed.Count 0 'patch removal count'
+    Assert-Sequence $added @(
+        '+      if (!process.stdout.isTTY || rest.includes("-p") || rest.includes("--print"))',
+        '+    config3.interactive = Boolean(process.stdout.isTTY);',
+        '+  delete env.OPENAI_API_KEY;',
+        '+    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {'
+    ) 'patch additions'
+    Assert-Sequence $removed @(
+        '-      if (rest.length > 0)',
+        '-    config3.interactive = true;',
+        '-    if (cliConfig.interactive && !cliConfig.jsonOutput) {'
+    ) 'patch removals'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'litellm.yaml'))) 'LiteLLM config is absent'
     $launcher = Get-Content -Raw -LiteralPath $launcherPath
     Assert-True ($launcher -notmatch 'ProcessStartInfo|Stop-CcxProcessTree|Test-CcxInteractive|taskkill') 'obsolete process machinery is absent'

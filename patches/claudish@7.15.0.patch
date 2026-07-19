@@ -1,7 +1,25 @@
 diff --git a/dist/index.js b/dist/index.js
-index 7ffebf33b292f567d33040cb4df0f1091d93784e..34ec2838f151e0c873b9227cf6cba129d59b91d2 100644
+index 7ffebf33b292f567d33040cb4df0f1091d93784e..f6a3e0c695eb9ac0c4f199ce0c29bf8a4ee878eb 100644
 --- a/dist/index.js
 +++ b/dist/index.js
+@@ -62684,7 +62684,7 @@ Usage:  claudish --models --provider <slug>`);
+     } else if (arg === "--") {
+       const rest = args.slice(i + 1);
+       config3.claudeArgs.push(...rest);
+-      if (rest.length > 0)
++      if (!process.stdout.isTTY || rest.includes("-p") || rest.includes("--print"))
+         config3._hasPositionalPrompt = true;
+       break;
+     } else if (arg.startsWith("-")) {
+@@ -62702,7 +62702,7 @@ Usage:  claudish --models --provider <slug>`);
+     i++;
+   }
+   if (!config3._hasPositionalPrompt && !config3.stdin && !config3._hasPrintFlag) {
+-    config3.interactive = true;
++    config3.interactive = Boolean(process.stdout.isTTY);
+   }
+   if (config3._sawVerbose && !config3.interactive && !config3.claudeArgs.includes("--verbose") && !config3.claudeArgs.includes("-v")) {
+     config3.claudeArgs.push("--verbose");
 @@ -71545,6 +71545,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
      [ENV.CLAUDISH_ACTIVE_MODEL_NAME]: modelDisplayName,
      CLAUDISH_IS_LOCAL: isLocalModel2 ? "true" : "false"
@@ -10,3 +28,12 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..34ec2838f151e0c873b9227cf6cba129
    delete env.CLAUDECODE;
    if (config3.monitor) {
      delete env.ANTHROPIC_API_KEY;
+@@ -72585,7 +72586,7 @@ Team Status`);
+         console.log(`[claudish] Debug log: ${logFile}`);
+       }
+     }
+-    if (cliConfig.interactive && !cliConfig.jsonOutput) {
++    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {
+       await traceSpan("startup:update-check", () => checkForUpdates2(getVersion4(), { quiet: cliConfig.quiet }));
+     }
+     if (!await traceSpan("startup:claude-detect", () => checkClaudeInstalled2())) {
