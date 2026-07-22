@@ -1,8 +1,17 @@
 diff --git a/dist/index.js b/dist/index.js
-index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c15cd3d11 100644
+index 7ffebf3..f760381 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -44106,8 +44106,10 @@ async function createProxyServer(port, _openrouterApiKey, model, monitorMode = fa
+@@ -38615,7 +38615,7 @@ class TokenTracker {
+     try {
+       const total = inputTokens + outputTokens;
+       const cw = this.config.contextWindow;
+-      const leftPct = cw > 0 ? Math.max(0, Math.min(100, Math.round((cw - total) / cw * 100))) : -1;
++      const leftPct = cw > 0 ? Math.max(0, Math.min(100, Math.round((cw - inputTokens) / cw * 100))) : -1;
+       const pricing = this.getPricing();
+       const isFreeModel = pricing.isFree || pricing.inputCostPer1M === 0 && pricing.outputCostPer1M === 0;
+       const data = {
+@@ -44106,8 +44106,10 @@ ${plan.hint}` : `[Route] ${plan.reason}`;
    const resolvedPort = typeof addr === "object" && addr?.port ? addr.port : port;
    log(`[Proxy] Server started on port ${resolvedPort}`);
    warmPricingCache().catch(() => {});
@@ -33,7 +42,10 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
    }
    if (config3._sawVerbose && !config3.interactive && !config3.claudeArgs.includes("--verbose") && !config3.claudeArgs.includes("-v")) {
      config3.claudeArgs.push("--verbose");
-@@ -71455,7 +71457,11 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode) {
+@@ -71452,11 +71454,15 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode) {
+     const formatTokensBash = `fmt_tok() { local n=\${1:-0}; if [ "$n" -ge 1000000 ]; then echo "$((n/1000000))M"; elif [ "$n" -ge 1000 ]; then echo "$((n/1000))k"; else echo "$n"; fi; }`;
+     statusCommand = `JSON=$(cat) && DIR=$(basename "$(pwd)") && [ \${#DIR} -gt 15 ] && DIR="\${DIR:0:12}..." || true && CTX=-1 && COST="0" && IS_FREE="false" && IS_EST="false" && PROVIDER="" && TOKEN_MODEL="" && IN_TOK=0 && CTX_WIN=0 && ${formatTokensBash} && if [ -f "${tokenFilePath}" ]; then TOKENS=$(cat "${tokenFilePath}" 2>/dev/null | tr -d ' \\n') && REAL_CTX=$(echo "$TOKENS" | grep -o '"context_left_percent":-\\?[0-9]*' | grep -o '\\-\\?[0-9]*') && if [ ! -z "$REAL_CTX" ]; then CTX="$REAL_CTX"; fi && REAL_COST=$(echo "$TOKENS" | grep -o '"total_cost":[0-9.]*' | cut -d: -f2) && if [ ! -z "$REAL_COST" ]; then COST="$REAL_COST"; fi && IN_TOK=$(echo "$TOKENS" | grep -o '"input_tokens":[0-9]*' | grep -o '[0-9]*') && CTX_WIN=$(echo "$TOKENS" | grep -o '"context_window":[0-9]*' | grep -o '[0-9]*') && IS_FREE=$(echo "$TOKENS" | grep -o '"is_free":[a-z]*' | cut -d: -f2) && IS_EST=$(echo "$TOKENS" | grep -o '"is_estimated":[a-z]*' | cut -d: -f2) && PROVIDER=$(echo "$TOKENS" | grep -o '"provider_name":"[^"]*"' | cut -d'"' -f4) && TOKEN_MODEL=$(echo "$TOKENS" | grep -o '"model_name":"[^"]*"' | cut -d'"' -f4); fi && if [ "$CLAUDISH_IS_LOCAL" = "true" ]; then COST_DISPLAY="LOCAL"; elif [ "$IS_FREE" = "true" ]; then COST_DISPLAY="FREE"; elif [ "$IS_EST" = "true" ]; then COST_DISPLAY=$(printf "~\\$%.3f" "$COST"); else COST_DISPLAY=$(printf "\\$%.3f" "$COST"); fi && MODEL_DISPLAY="\${TOKEN_MODEL:-$CLAUDISH_ACTIVE_MODEL_NAME}" && if [ ! -z "$PROVIDER" ]; then MODEL_DISPLAY="$PROVIDER $MODEL_DISPLAY"; fi && if [ "$CTX" -lt 0 ] 2>/dev/null || [ "$CTX_WIN" -le 0 ] 2>/dev/null; then if [ "$IN_TOK" -gt 0 ] 2>/dev/null; then CTX_DISPLAY="$(fmt_tok $IN_TOK) tokens"; else CTX_DISPLAY="N/A"; fi; elif [ "$IN_TOK" -gt 0 ] 2>/dev/null && [ "$CTX_WIN" -gt 0 ] 2>/dev/null; then CTX_DISPLAY="$CTX% ($(fmt_tok $IN_TOK)/$(fmt_tok $CTX_WIN))"; else CTX_DISPLAY="$CTX%"; fi && printf "${CYAN4}${BOLD4}%s${RESET4} ${DIM4}\u2022${RESET4} ${YELLOW3}%s${RESET4} ${DIM4}\u2022${RESET4} ${GREEN4}%s${RESET4} ${DIM4}\u2022${RESET4} ${MAGENTA3}%s${RESET4}\\n" "$DIR" "$MODEL_DISPLAY" "$COST_DISPLAY" "$CTX_DISPLAY"`;
+   }
 -  const statusLine = {
 +  let statusLine = {
      type: "command",
@@ -46,15 +58,25 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
 +  } catch {}
    const settings = buildClaudishSettingsOverlay(statusLine, proxyAuthMode);
    writeFileSync17(tempPath, JSON.stringify(settings, null, 2), "utf-8");
-@@ -71545,6 +71551,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+   return { path: tempPath, statusLine };
+@@ -71539,12 +71545,16 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+   }
+   const isLocalModel2 = modelId ? modelId.startsWith("ollama/") || modelId.startsWith("ollama:") || modelId.startsWith("lmstudio/") || modelId.startsWith("lmstudio:") || modelId.startsWith("vllm/") || modelId.startsWith("vllm:") || modelId.startsWith("mlx/") || modelId.startsWith("mlx:") || modelId.startsWith("http://") || modelId.startsWith("https://") : false;
+   const modelDisplayName = modelId || config3.profile || "default";
++  const bareModelId = modelId?.includes("@") ? modelId.slice(modelId.indexOf("@") + 1) : modelId;
++  const contextWindow = bareModelId === "gpt-5.6-sol" ? 1050000 : bareModelId ? lookupModel(bareModelId)?.contextWindow : undefined;
+   const env = {
+     ...process.env,
+     ANTHROPIC_BASE_URL: proxyUrl,
      [ENV.CLAUDISH_ACTIVE_MODEL_NAME]: modelDisplayName,
      CLAUDISH_IS_LOCAL: isLocalModel2 ? "true" : "false"
    };
++  if (contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextWindow);
 +  delete env.OPENAI_API_KEY;
    delete env.CLAUDECODE;
    if (config3.monitor) {
      delete env.ANTHROPIC_API_KEY;
-@@ -71563,6 +71570,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -71563,6 +71573,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
        env.ANTHROPIC_AUTH_TOKEN = process.env.ANTHROPIC_AUTH_TOKEN || "placeholder-token-not-used-proxy-handles-auth";
      }
    }
@@ -62,7 +84,7 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
    const log2 = (message) => {
      if (!config3.quiet) {
        if (config3.interactive) {
-@@ -72585,7 +72593,7 @@ Team Status`);
+@@ -72585,7 +72596,7 @@ Team Status`);
          console.log(`[claudish] Debug log: ${logFile}`);
        }
      }
@@ -71,9 +93,7 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
        await traceSpan("startup:update-check", () => checkForUpdates2(getVersion4(), { quiet: cliConfig.quiet }));
      }
      if (!await traceSpan("startup:claude-detect", () => checkClaudeInstalled2())) {
-@@ -72682,8 +72690,9 @@ Team Status`);
-     const proxy = await traceSpan("startup:proxy-start", () => createProxyServer2(port, cliConfig.monitor ? undefined : cliConfig.openrouterApiKey, cliConfig.monitor ? undefined : explicitModel, cliConfig.monitor, cliConfig.anthropicApiKey, modelMap, {
-       summarizeTools: cliConfig.summarizeTools,
+@@ -72684,7 +72695,8 @@ Team Status`);
        quiet: cliConfig.quiet,
        isInteractive: cliConfig.interactive,
        advisorModels: cliConfig.advisorModels,
@@ -82,3 +102,4 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
 +      skipModelsUpdate: cliConfig.skipModelsUpdate
      }));
      const diag = createDiagOutput2({
+       interactive: cliConfig.interactive,
