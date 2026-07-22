@@ -70,14 +70,15 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             [Environment]::SetEnvironmentVariable($name, $parent[$name], 'Process')
         }
         $PSNativeCommandUseErrorActionPreference = $true
-        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://api.openai.com"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), (-not [bool]$env:ANTHROPIC_API_KEY), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
+        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), (-not [bool]$env:ANTHROPIC_API_KEY), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
         $oldTestExit = $env:CCX_TEST_EXIT
         $env:CCX_TEST_EXIT = [string]$ExitCode
         try {
             $output = @(Invoke-CcxCommand `
                 -BunPath (Join-Path $PSHOME 'pwsh.exe') `
                 -ClaudishArgs @('-NoProfile', '-Command', $childScript) `
-                -OpenAIKey 'fake-openai-key')
+                -OpenAIKey 'fake-openai-key' `
+                -OpenAIBaseUrl 'https://proxy.invalid')
         } finally {
             $env:CCX_TEST_EXIT = $oldTestExit
         }
@@ -124,18 +125,25 @@ Test-Case 'missing and empty models are rejected precisely' {
     Assert-Throws { Split-CcxArguments -Arguments @('--model=') } 'Model value for --model cannot be empty.' 'empty equals model'
 }
 
-Test-Case 'auth reader uses only the configured fake key' {
+Test-Case 'environment key takes precedence and auth file remains the fallback' {
     $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-auth-test-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $testDrive | Out-Null
     try {
         $fakeAuth = Join-Path $testDrive 'auth.json'
         Set-Content -LiteralPath $fakeAuth -Value '{"OPENAI_API_KEY":"fake-openai-key"}'
-        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth) 'fake-openai-key' 'fake key'
+        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey 'env-openai-key') 'env-openai-key' 'environment key'
+        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey '') 'fake-openai-key' 'auth file key'
         Set-Content -LiteralPath $fakeAuth -Value '{"auth_mode":"chatgpt"}'
-        Assert-Throws { Get-OpenAIKey -AuthPath $fakeAuth } "OPENAI_API_KEY is missing from $fakeAuth" 'missing key'
+        Assert-Throws { Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey '' } "OPENAI_API_KEY is missing from $fakeAuth" 'missing key'
     } finally {
         Remove-Item -LiteralPath $testDrive -Recurse -Force
     }
+}
+
+Test-Case 'SDK-style OpenAI base URLs are normalized for Claudish' {
+    Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl '') 'https://api.openai.com' 'official fallback'
+    Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl 'https://proxy.invalid/v1/') 'https://proxy.invalid' 'SDK-style base URL'
+    Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl 'https://proxy.invalid/custom') 'https://proxy.invalid/custom' 'custom path'
 }
 
 Test-Case 'Claudish arguments defer all modes to the patched actual-handle classifier' {
