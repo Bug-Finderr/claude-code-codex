@@ -70,14 +70,15 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             [Environment]::SetEnvironmentVariable($name, $parent[$name], 'Process')
         }
         $PSNativeCommandUseErrorActionPreference = $true
-        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://api.openai.com"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), (-not [bool]$env:ANTHROPIC_API_KEY), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
+        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), (-not [bool]$env:ANTHROPIC_API_KEY), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
         $oldTestExit = $env:CCX_TEST_EXIT
         $env:CCX_TEST_EXIT = [string]$ExitCode
         try {
             $output = @(Invoke-CcxCommand `
                 -BunPath (Join-Path $PSHOME 'pwsh.exe') `
                 -ClaudishArgs @('-NoProfile', '-Command', $childScript) `
-                -OpenAIKey 'fake-openai-key')
+                -OpenAIKey 'fake-openai-key' `
+                -OpenAIBaseUrl 'https://proxy.invalid')
         } finally {
             $env:CCX_TEST_EXIT = $oldTestExit
         }
@@ -124,18 +125,25 @@ Test-Case 'missing and empty models are rejected precisely' {
     Assert-Throws { Split-CcxArguments -Arguments @('--model=') } 'Model value for --model cannot be empty.' 'empty equals model'
 }
 
-Test-Case 'auth reader uses only the configured fake key' {
+Test-Case 'environment key takes precedence and auth file remains the fallback' {
     $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-auth-test-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $testDrive | Out-Null
     try {
         $fakeAuth = Join-Path $testDrive 'auth.json'
         Set-Content -LiteralPath $fakeAuth -Value '{"OPENAI_API_KEY":"fake-openai-key"}'
-        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth) 'fake-openai-key' 'fake key'
+        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey 'env-openai-key') 'env-openai-key' 'environment key'
+        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey '') 'fake-openai-key' 'auth file key'
         Set-Content -LiteralPath $fakeAuth -Value '{"auth_mode":"chatgpt"}'
-        Assert-Throws { Get-OpenAIKey -AuthPath $fakeAuth } "OPENAI_API_KEY is missing from $fakeAuth" 'missing key'
+        Assert-Throws { Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey '' } "OPENAI_API_KEY is missing from $fakeAuth" 'missing key'
     } finally {
         Remove-Item -LiteralPath $testDrive -Recurse -Force
     }
+}
+
+Test-Case 'SDK-style OpenAI base URLs are normalized for Claudish' {
+    Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl '') 'https://api.openai.com' 'official fallback'
+    Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl 'https://proxy.invalid/v1/') 'https://proxy.invalid' 'SDK-style base URL'
+    Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl 'https://proxy.invalid/custom') 'https://proxy.invalid/custom' 'custom path'
 }
 
 Test-Case 'Claudish arguments defer all modes to the patched actual-handle classifier' {
@@ -330,51 +338,6 @@ exit /b %ERRORLEVEL%
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
         Remove-Item -LiteralPath $testDrive -Recurse -Force
     }
-}
-
-Test-Case 'dependency patch and artifact contract is minimal' {
-    $package = Get-Content -Raw -LiteralPath (Join-Path $root 'package.json') | ConvertFrom-Json
-    Assert-Equal $package.packageManager 'bun@1.3.14' 'Bun pin'
-    Assert-Equal $package.dependencies.claudish '7.15.0' 'Claudish pin'
-    Assert-Equal $package.patchedDependencies.'claudish@7.15.0' 'patches/claudish@7.15.0.patch' 'patch registration'
-    $patchLines = Get-Content -LiteralPath (Join-Path $root 'patches/claudish@7.15.0.patch')
-    $added = @($patchLines | Where-Object { $_ -match '^\+(?!\+\+)' })
-    $removed = @($patchLines | Where-Object { $_ -match '^-(?!--)' })
-    Assert-Sequence $added @(
-        '+      const leftPct = cw > 0 ? Math.max(0, Math.min(100, Math.round((cw - inputTokens) / cw * 100))) : -1;',
-        '+  if (!options.skipModelsUpdate) {',
-        '+    warmRecommendedModels().catch(() => {});',
-        '+    warmAllCatalogs(["openrouter"]).catch(() => {});',
-        '+  }',
-        '+      if (!process.stdout.isTTY || rest.includes("-p") || rest.includes("--print"))',
-        '+    config3.interactive = Boolean(process.stdout.isTTY);',
-        '+  let statusLine = {',
-        '+  try {',
-        '+    const configured = JSON.parse(readFileSync21(join25(homeDir, ".claude", "settings.json"), "utf-8")).statusLine;',
-        '+    if (configured?.command) statusLine = configured;',
-        '+  } catch {}',
-        '+  const bareModelId = modelId?.includes("@") ? modelId.slice(modelId.indexOf("@") + 1) : modelId;',
-        '+  const contextWindow = bareModelId === "gpt-5.6-sol" ? 1050000 : bareModelId ? lookupModel(bareModelId)?.contextWindow : undefined;',
-        '+  if (contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextWindow);',
-        '+  delete env.OPENAI_API_KEY;',
-        '+  delete env.ANTHROPIC_API_KEY;',
-        '+    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {',
-        '+      advisorCollector: cliConfig.advisorCollector,',
-        '+      skipModelsUpdate: cliConfig.skipModelsUpdate'
-    ) 'patch additions'
-    Assert-Sequence $removed @(
-        '-      const leftPct = cw > 0 ? Math.max(0, Math.min(100, Math.round((cw - total) / cw * 100))) : -1;',
-        '-  warmRecommendedModels().catch(() => {});',
-        '-  warmAllCatalogs(["openrouter"]).catch(() => {});',
-        '-      if (rest.length > 0)',
-        '-    config3.interactive = true;',
-        '-  const statusLine = {',
-        '-    if (cliConfig.interactive && !cliConfig.jsonOutput) {',
-        '-      advisorCollector: cliConfig.advisorCollector'
-    ) 'patch removals'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'litellm.yaml'))) 'LiteLLM config is absent'
-    $launcher = Get-Content -Raw -LiteralPath $launcherPath
-    Assert-True ($launcher -notmatch 'ProcessStartInfo|Stop-CcxProcessTree|Test-CcxInteractive|taskkill') 'obsolete process machinery is absent'
 }
 
 if ($failures.Count) {

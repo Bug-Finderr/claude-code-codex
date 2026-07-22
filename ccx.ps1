@@ -1,12 +1,23 @@
 $ErrorActionPreference = 'Stop'
 
 function Get-OpenAIKey {
-    param([Parameter(Mandatory)][string]$AuthPath)
+    param(
+        [Parameter(Mandatory)][string]$AuthPath,
+        [AllowEmptyString()][string]$EnvironmentKey = $env:OPENAI_API_KEY
+    )
 
+    if (-not [string]::IsNullOrWhiteSpace($EnvironmentKey)) { return $EnvironmentKey }
     if (-not (Test-Path -LiteralPath $AuthPath)) { throw "Codex auth file not found: $AuthPath" }
     $auth = Get-Content -Raw -LiteralPath $AuthPath | ConvertFrom-Json
     if (-not $auth.OPENAI_API_KEY) { throw "OPENAI_API_KEY is missing from $AuthPath" }
     $auth.OPENAI_API_KEY
+}
+
+function Get-ClaudishOpenAIBaseUrl {
+    param([AllowEmptyString()][string]$BaseUrl = $env:OPENAI_BASE_URL)
+
+    if ([string]::IsNullOrWhiteSpace($BaseUrl)) { return 'https://api.openai.com' }
+    $BaseUrl.Trim().TrimEnd('/') -replace '/v1$', ''
 }
 
 function Split-CcxArguments {
@@ -69,12 +80,13 @@ function Invoke-CcxCommand {
     param(
         [Parameter(Mandatory)][string]$BunPath,
         [string[]]$ClaudishArgs = @(),
-        [Parameter(Mandatory)][string]$OpenAIKey
+        [Parameter(Mandatory)][string]$OpenAIKey,
+        [string]$OpenAIBaseUrl = 'https://api.openai.com'
     )
 
     $environment = [ordered]@{
         OPENAI_API_KEY = $OpenAIKey
-        OPENAI_BASE_URL = 'https://api.openai.com'
+        OPENAI_BASE_URL = $OpenAIBaseUrl
         CLAUDISH_STATS = 'off'
         CLAUDISH_TELEMETRY = '0'
         ANTHROPIC_API_KEY = $null
@@ -114,10 +126,12 @@ function Invoke-Ccx {
         -ClaudishPath $claudishPath `
         -Model $parsed.Model `
         -ClaudeArgs $parsed.ClaudeArgs)
+    $openAIKey = Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json')
     Invoke-CcxCommand `
         -BunPath $bun.Source `
         -ClaudishArgs $claudishArgs `
-        -OpenAIKey (Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json'))
+        -OpenAIKey $openAIKey `
+        -OpenAIBaseUrl (Get-ClaudishOpenAIBaseUrl)
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
