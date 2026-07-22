@@ -217,7 +217,7 @@ Test-Case 'missing native command restores environment and retains failure exit'
     }
 }
 
-Test-Case 'patched real Claudish filters Claude child auth environment' {
+Test-Case 'patched real Claudish configures the Claude child environment' {
     $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-claudish-test-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $testDrive | Out-Null
     $names = @('CLAUDE_PATH', 'HOME', 'USERPROFILE', 'LOCALAPPDATA')
@@ -242,6 +242,7 @@ if defined ANTHROPIC_AUTH_TOKEN (
 ) else (
   >>"%CCX_ENV_CAPTURE_PATH%" echo(anthropic-token-absent
 )
+>>"%CCX_ENV_CAPTURE_PATH%" echo(context-window-%CLAUDE_CODE_MAX_CONTEXT_TOKENS%
 exit /b 0
 '@
         foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
@@ -254,7 +255,7 @@ exit /b 0
         try {
             $claudishArgs = @(Get-ClaudishArguments `
                 -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
-                -Model 'gpt-test' `
+                -Model 'gpt-5.6-sol' `
                 -ClaudeArgs @('-p', 'smoke'))
             $output = @(Invoke-CcxCommand `
                 -BunPath (Get-Command bun -CommandType Application).Source `
@@ -268,7 +269,8 @@ exit /b 0
         Assert-Sequence @(Get-Content -LiteralPath $environmentCapturePath) @(
             'openai-absent',
             'anthropic-key-absent',
-            'anthropic-token-present'
+            'anthropic-token-present',
+            'context-window-1050000'
         ) 'Claude child auth environment'
     } finally {
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
@@ -339,6 +341,7 @@ Test-Case 'dependency patch and artifact contract is minimal' {
     $added = @($patchLines | Where-Object { $_ -match '^\+(?!\+\+)' })
     $removed = @($patchLines | Where-Object { $_ -match '^-(?!--)' })
     Assert-Sequence $added @(
+        '+      const leftPct = cw > 0 ? Math.max(0, Math.min(100, Math.round((cw - inputTokens) / cw * 100))) : -1;',
         '+  if (!options.skipModelsUpdate) {',
         '+    warmRecommendedModels().catch(() => {});',
         '+    warmAllCatalogs(["openrouter"]).catch(() => {});',
@@ -350,6 +353,9 @@ Test-Case 'dependency patch and artifact contract is minimal' {
         '+    const configured = JSON.parse(readFileSync21(join25(homeDir, ".claude", "settings.json"), "utf-8")).statusLine;',
         '+    if (configured?.command) statusLine = configured;',
         '+  } catch {}',
+        '+  const bareModelId = modelId?.includes("@") ? modelId.slice(modelId.indexOf("@") + 1) : modelId;',
+        '+  const contextWindow = bareModelId === "gpt-5.6-sol" ? 1050000 : bareModelId ? lookupModel(bareModelId)?.contextWindow : undefined;',
+        '+  if (contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextWindow);',
         '+  delete env.OPENAI_API_KEY;',
         '+  delete env.ANTHROPIC_API_KEY;',
         '+    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {',
@@ -357,6 +363,7 @@ Test-Case 'dependency patch and artifact contract is minimal' {
         '+      skipModelsUpdate: cliConfig.skipModelsUpdate'
     ) 'patch additions'
     Assert-Sequence $removed @(
+        '-      const leftPct = cw > 0 ? Math.max(0, Math.min(100, Math.round((cw - total) / cw * 100))) : -1;',
         '-  warmRecommendedModels().catch(() => {});',
         '-  warmAllCatalogs(["openrouter"]).catch(() => {});',
         '-      if (rest.length > 0)',
