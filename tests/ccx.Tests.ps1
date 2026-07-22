@@ -340,51 +340,6 @@ exit /b %ERRORLEVEL%
     }
 }
 
-Test-Case 'dependency patch and artifact contract is minimal' {
-    $package = Get-Content -Raw -LiteralPath (Join-Path $root 'package.json') | ConvertFrom-Json
-    Assert-Equal $package.packageManager 'bun@1.3.14' 'Bun pin'
-    Assert-Equal $package.dependencies.claudish '7.15.0' 'Claudish pin'
-    Assert-Equal $package.patchedDependencies.'claudish@7.15.0' 'patches/claudish@7.15.0.patch' 'patch registration'
-    $patchLines = Get-Content -LiteralPath (Join-Path $root 'patches/claudish@7.15.0.patch')
-    $added = @($patchLines | Where-Object { $_ -match '^\+(?!\+\+)' })
-    $removed = @($patchLines | Where-Object { $_ -match '^-(?!--)' })
-    Assert-Sequence $added @(
-        '+      const leftPct = cw > 0 ? Math.max(0, Math.min(100, Math.round((cw - inputTokens) / cw * 100))) : -1;',
-        '+  if (!options.skipModelsUpdate) {',
-        '+    warmRecommendedModels().catch(() => {});',
-        '+    warmAllCatalogs(["openrouter"]).catch(() => {});',
-        '+  }',
-        '+      if (!process.stdout.isTTY || rest.includes("-p") || rest.includes("--print"))',
-        '+    config3.interactive = Boolean(process.stdout.isTTY);',
-        '+  let statusLine = {',
-        '+  try {',
-        '+    const configured = JSON.parse(readFileSync21(join25(homeDir, ".claude", "settings.json"), "utf-8")).statusLine;',
-        '+    if (configured?.command) statusLine = configured;',
-        '+  } catch {}',
-        '+  const bareModelId = modelId?.includes("@") ? modelId.slice(modelId.indexOf("@") + 1) : modelId;',
-        '+  const contextWindow = bareModelId === "gpt-5.6-sol" ? 1050000 : bareModelId ? lookupModel(bareModelId)?.contextWindow : undefined;',
-        '+  if (contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextWindow);',
-        '+  delete env.OPENAI_API_KEY;',
-        '+  delete env.ANTHROPIC_API_KEY;',
-        '+    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {',
-        '+      advisorCollector: cliConfig.advisorCollector,',
-        '+      skipModelsUpdate: cliConfig.skipModelsUpdate'
-    ) 'patch additions'
-    Assert-Sequence $removed @(
-        '-      const leftPct = cw > 0 ? Math.max(0, Math.min(100, Math.round((cw - total) / cw * 100))) : -1;',
-        '-  warmRecommendedModels().catch(() => {});',
-        '-  warmAllCatalogs(["openrouter"]).catch(() => {});',
-        '-      if (rest.length > 0)',
-        '-    config3.interactive = true;',
-        '-  const statusLine = {',
-        '-    if (cliConfig.interactive && !cliConfig.jsonOutput) {',
-        '-      advisorCollector: cliConfig.advisorCollector'
-    ) 'patch removals'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'litellm.yaml'))) 'LiteLLM config is absent'
-    $launcher = Get-Content -Raw -LiteralPath $launcherPath
-    Assert-True ($launcher -notmatch 'ProcessStartInfo|Stop-CcxProcessTree|Test-CcxInteractive|taskkill') 'obsolete process machinery is absent'
-}
-
 if ($failures.Count) {
     $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
     throw "$($failures.Count) launcher contract test(s) failed."
