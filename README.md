@@ -35,7 +35,7 @@ Environment variables take precedence over the defaults. For example, to use the
 
 ```powershell
 $env:OPENAI_API_KEY = '<proxy-token>'
-$env:OPENAI_BASE_URL = 'https://api-proxy.bugg.workers.dev/v1'
+$env:OPENAI_BASE_URL = '<proxy_url>'
 ccx
 ```
 
