@@ -33,7 +33,20 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
    }
    if (config3._sawVerbose && !config3.interactive && !config3.claudeArgs.includes("--verbose") && !config3.claudeArgs.includes("-v")) {
      config3.claudeArgs.push("--verbose");
-@@ -71545,6 +71547,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -71455,7 +71457,11 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode) {
+-  const statusLine = {
++  let statusLine = {
+     type: "command",
+     command: statusCommand,
+     padding: 0
+   };
++  try {
++    const configured = JSON.parse(readFileSync21(join25(homeDir, ".claude", "settings.json"), "utf-8")).statusLine;
++    if (configured?.command) statusLine = configured;
++  } catch {}
+   const settings = buildClaudishSettingsOverlay(statusLine, proxyAuthMode);
+   writeFileSync17(tempPath, JSON.stringify(settings, null, 2), "utf-8");
+@@ -71545,6 +71551,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
      [ENV.CLAUDISH_ACTIVE_MODEL_NAME]: modelDisplayName,
      CLAUDISH_IS_LOCAL: isLocalModel2 ? "true" : "false"
    };
@@ -41,7 +54,7 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
    delete env.CLAUDECODE;
    if (config3.monitor) {
      delete env.ANTHROPIC_API_KEY;
-@@ -71563,6 +71566,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -71563,6 +71570,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
        env.ANTHROPIC_AUTH_TOKEN = process.env.ANTHROPIC_AUTH_TOKEN || "placeholder-token-not-used-proxy-handles-auth";
      }
    }
@@ -49,7 +62,7 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
    const log2 = (message) => {
      if (!config3.quiet) {
        if (config3.interactive) {
-@@ -72585,7 +72589,7 @@ Team Status`);
+@@ -72585,7 +72593,7 @@ Team Status`);
          console.log(`[claudish] Debug log: ${logFile}`);
        }
      }
@@ -58,7 +71,7 @@ index 7ffebf33b292f567d33040cb4df0f1091d93784e..e90514edc98023abbed0170192409c1c
        await traceSpan("startup:update-check", () => checkForUpdates2(getVersion4(), { quiet: cliConfig.quiet }));
      }
      if (!await traceSpan("startup:claude-detect", () => checkClaudeInstalled2())) {
-@@ -72682,8 +72686,9 @@ Team Status`);
+@@ -72682,8 +72690,9 @@ Team Status`);
      const proxy = await traceSpan("startup:proxy-start", () => createProxyServer2(port, cliConfig.monitor ? undefined : cliConfig.openrouterApiKey, cliConfig.monitor ? undefined : explicitModel, cliConfig.monitor, cliConfig.anthropicApiKey, modelMap, {
        summarizeTools: cliConfig.summarizeTools,
        quiet: cliConfig.quiet,

@@ -345,6 +345,11 @@ Test-Case 'dependency patch and artifact contract is minimal' {
         '+  }',
         '+      if (!process.stdout.isTTY || rest.includes("-p") || rest.includes("--print"))',
         '+    config3.interactive = Boolean(process.stdout.isTTY);',
+        '+  let statusLine = {',
+        '+  try {',
+        '+    const configured = JSON.parse(readFileSync21(join25(homeDir, ".claude", "settings.json"), "utf-8")).statusLine;',
+        '+    if (configured?.command) statusLine = configured;',
+        '+  } catch {}',
         '+  delete env.OPENAI_API_KEY;',
         '+  delete env.ANTHROPIC_API_KEY;',
         '+    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {',
@@ -356,6 +361,7 @@ Test-Case 'dependency patch and artifact contract is minimal' {
         '-  warmAllCatalogs(["openrouter"]).catch(() => {});',
         '-      if (rest.length > 0)',
         '-    config3.interactive = true;',
+        '-  const statusLine = {',
         '-    if (cliConfig.interactive && !cliConfig.jsonOutput) {',
         '-      advisorCollector: cliConfig.advisorCollector'
     ) 'patch removals'
