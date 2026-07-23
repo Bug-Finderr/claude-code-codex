@@ -49,6 +49,7 @@ $temporaryEnvironmentNames = @(
     'OPENAI_BASE_URL',
     'CLAUDISH_STATS',
     'CLAUDISH_TELEMETRY',
+    'CCX_AGENT_MODEL_HOOK',
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_AUTH_TOKEN'
 )
@@ -60,6 +61,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
         OPENAI_BASE_URL = 'https://parent.invalid'
         CLAUDISH_STATS = 'parent-stats'
         CLAUDISH_TELEMETRY = 'parent-telemetry'
+        CCX_AGENT_MODEL_HOOK = 'parent-hook'
         ANTHROPIC_API_KEY = 'parent-anthropic-key'
         ANTHROPIC_AUTH_TOKEN = 'parent-anthropic-token'
     }
@@ -70,7 +72,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             [Environment]::SetEnvironmentVariable($name, $parent[$name], 'Process')
         }
         $PSNativeCommandUseErrorActionPreference = $true
-        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), (-not [bool]$env:ANTHROPIC_API_KEY), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
+        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:CCX_AGENT_MODEL_HOOK -like "*agent-model-hook.ps1"), (-not [bool]$env:ANTHROPIC_API_KEY), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
         $oldTestExit = $env:CCX_TEST_EXIT
         $env:CCX_TEST_EXIT = [string]$ExitCode
         try {
@@ -83,7 +85,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             $env:CCX_TEST_EXIT = $oldTestExit
         }
 
-        Assert-Sequence $output @('True|True|True|True|True|True') 'translator environment'
+        Assert-Sequence $output @('True|True|True|True|True|True|True') 'translator environment'
         Assert-Equal $script:CcxExitCode $ExitCode 'child exit code'
         Assert-True $PSNativeCommandUseErrorActionPreference 'caller native error preference is unchanged'
         foreach ($name in $temporaryEnvironmentNames) {
@@ -151,8 +153,10 @@ Test-Case 'Claudish arguments defer all modes to the patched actual-handle class
         $arguments = @(Get-ClaudishArguments -ClaudishPath 'C:\fake\claudish.js' -Model 'gpt-test' -ClaudeArgs $claudeArgs)
         Assert-True ($arguments -notcontains '--interactive') 'interactive control flag is absent'
         Assert-True ($arguments -notcontains '--json') 'JSON control flag is absent'
+        $preserveModels = [Array]::IndexOf($arguments, '--preserve-request-models')
         $dangerous = [Array]::IndexOf($arguments, '--dangerously-skip-permissions')
         $separator = [Array]::IndexOf($arguments, '--')
+        Assert-True ($preserveModels -ge 0 -and $preserveModels -lt $separator) 'requested-model routing precedes separator'
         Assert-True ($dangerous -lt $separator) 'auto approval precedes separator'
         $forwarded = if ($separator + 1 -lt $arguments.Count) { @($arguments[($separator + 1)..($arguments.Count - 1)]) } else { @() }
         Assert-Sequence $forwarded $claudeArgs 'post-separator Claude arguments'
@@ -233,6 +237,9 @@ Test-Case 'patched real Claudish configures the Claude child environment' {
     try {
         $fakeClaude = Join-Path $testDrive 'claude.cmd'
         $environmentCapturePath = Join-Path $testDrive 'claude-env.txt'
+        $settingsCapturePath = Join-Path $testDrive 'claude-settings.json'
+        $userSettingsPath = Join-Path $testDrive 'user-settings.json'
+        Set-Content -LiteralPath $userSettingsPath -Value '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo user"}]}]}}'
         Set-Content -LiteralPath $fakeClaude -Encoding ascii -Value @'
 @echo off
 if defined OPENAI_API_KEY (
@@ -251,6 +258,12 @@ if defined ANTHROPIC_AUTH_TOKEN (
   >>"%CCX_ENV_CAPTURE_PATH%" echo(anthropic-token-absent
 )
 >>"%CCX_ENV_CAPTURE_PATH%" echo(context-window-%CLAUDE_CODE_MAX_CONTEXT_TOKENS%
+:args
+if "%~1"=="" goto done
+if /i "%~1"=="--settings" copy /y "%~2" "%CCX_SETTINGS_CAPTURE_PATH%" >nul
+shift
+goto args
+:done
 exit /b 0
 '@
         foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
@@ -259,30 +272,61 @@ exit /b 0
         $env:USERPROFILE = $testDrive
         $env:LOCALAPPDATA = $testDrive
         $oldCapturePath = $env:CCX_ENV_CAPTURE_PATH
+        $oldSettingsCapturePath = $env:CCX_SETTINGS_CAPTURE_PATH
         $env:CCX_ENV_CAPTURE_PATH = $environmentCapturePath
+        $env:CCX_SETTINGS_CAPTURE_PATH = $settingsCapturePath
         try {
             $claudishArgs = @(Get-ClaudishArguments `
                 -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
                 -Model 'gpt-5.6-sol' `
-                -ClaudeArgs @('-p', 'smoke'))
+                -ClaudeArgs @('-p', 'smoke', '--settings', $userSettingsPath))
             $output = @(Invoke-CcxCommand `
                 -BunPath (Get-Command bun -CommandType Application).Source `
                 -ClaudishArgs $claudishArgs `
                 -OpenAIKey 'fake-openai-key')
         } finally {
             $env:CCX_ENV_CAPTURE_PATH = $oldCapturePath
+            $env:CCX_SETTINGS_CAPTURE_PATH = $oldSettingsCapturePath
         }
         Assert-Equal $script:CcxExitCode 0 'Claudish smoke exit code'
         Assert-Equal $output.Count 0 'Claudish smoke stdout'
         Assert-Sequence @(Get-Content -LiteralPath $environmentCapturePath) @(
             'openai-absent',
             'anthropic-key-absent',
-            'anthropic-token-present',
+            'anthropic-token-absent',
             'context-window-1050000'
         ) 'Claude child auth environment'
+        $settings = Get-Content -LiteralPath $settingsCapturePath -Raw | ConvertFrom-Json
+        Assert-Equal $settings.hooks.PreToolUse.Count 2 'user and ccx hooks survive settings merge'
+        Assert-Sequence @($settings.hooks.PreToolUse.matcher) @('Bash', 'Agent') 'settings hook order'
     } finally {
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
         Remove-Item -LiteralPath $testDrive -Recurse -Force
+    }
+}
+
+Test-Case 'OpenAI Responses starts workflow usage from the current request' {
+    $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
+    Assert-True ($source.Contains('initialInputTokens: estimateTokens(JSON.stringify(claudeRequest))')) 'request token estimate is passed to the stream'
+    Assert-True ($source.Contains('usage: { input_tokens: opts.initialInputTokens, output_tokens: 1 }')) 'message_start uses the request estimate'
+}
+
+Test-Case 'Claudish installs the ccx Agent model hook' {
+    $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
+    Assert-True ($source.Contains('const agentModelHook = process.env.CCX_AGENT_MODEL_HOOK;')) 'hook path is read from the ccx environment'
+}
+
+Test-Case 'Agent model hook inherits Sonnet and preserves explicit native models' {
+    $hook = Join-Path $root 'agent-model-hook.ps1'
+    Assert-True (Test-Path -LiteralPath $hook) 'Agent model hook exists'
+
+    $sonnet = '{"tool_name":"Agent","tool_input":{"description":"probe","prompt":"reply ok","subagent_type":"general-purpose","model":"sonnet"}}' | & pwsh -NoProfile -File $hook | ConvertFrom-Json
+    Assert-True (-not $sonnet.hookSpecificOutput.updatedInput.PSObject.Properties['model']) 'Sonnet override is removed'
+    Assert-Equal $sonnet.hookSpecificOutput.updatedInput.prompt 'reply ok' 'other Agent input is preserved'
+
+    foreach ($model in 'fable', 'opus') {
+        $output = @('{"tool_name":"Agent","tool_input":{"model":"' + $model + '"}}' | & pwsh -NoProfile -File $hook)
+        Assert-Equal $output.Count 0 "$model passes through unchanged"
     }
 }
 

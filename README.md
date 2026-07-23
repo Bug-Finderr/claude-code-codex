@@ -56,6 +56,8 @@ ccx --model gpt-5.6-sol -- --verbose
 
 The pinned Claudish patch classifies mode from its actual stdout handle. Attached positional prompts, flags, and resume flows stay interactive; redirected output and explicit `-p` or `--print` stay headless. `--models-skip-update` also suppresses Claudish's package update check.
 
+The selected OpenAI model remains the main model. A ccx-only `PreToolUse` hook removes Sonnet overrides from ordinary Agent calls so they inherit that model, while explicit Fable and Opus choices remain unchanged. Workflows also keep their explicit task models. OpenAI model IDs use the configured OpenAI endpoint; native Claude IDs use the existing Claude Code subscription login. The task UI and transcript therefore report the model that actually handled each task. OpenAI workflow token rows use Claudish's request-size estimate because exact input usage arrives only when the stream completes.
+
 PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
 
 Every invocation explicitly disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag directly before the passthrough separator. It temporarily sets the selected OpenAI key and base URL plus Claudish isolation variables, removes inherited Anthropic credentials, and restores the parent environment afterward. The dependency patch removes the OpenAI key before Claude Code is spawned, after Claudish has read it for its local translator.
