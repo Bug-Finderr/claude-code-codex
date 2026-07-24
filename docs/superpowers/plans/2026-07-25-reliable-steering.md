@@ -4,7 +4,7 @@
 
 **Goal:** Make ccx honor user corrections typed during an active Claude Code turn.
 
-**Architecture:** Keep Claude Code's queue and ccx's launcher unchanged. Patch Claudish's OpenAI message formatter so complete Claude-specific `<system-reminder>` text blocks are emitted before genuine user text from the same user message, leaving tool results first and user steering last.
+**Architecture:** Keep Claude Code's queue and ccx's launcher unchanged. Patch Claudish's OpenAI message formatter so mid-conversation system messages are preserved as user input, leaving tool results first and queued steering last.
 
 **Tech Stack:** PowerShell 7, Bun 1.3.14, Claudish 7.17.1, bundled JavaScript patch
 
@@ -18,9 +18,9 @@
 - [ ] **Step 1: Add the focused failing check**
 
 ```powershell
-Test-Case 'Claudish presents queued steering after synthetic reminders' {
+Test-Case 'Claudish preserves mid-turn steering messages' {
     $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
-    Assert-True ($source.Contains('contentParts.unshift(...systemReminderParts);')) 'system reminders precede genuine user text'
+    Assert-True ($source.Contains('else if (msg.role === "system")')) 'mid-conversation system messages reach OpenAI'
 }
 ```
 
@@ -28,7 +28,7 @@ Test-Case 'Claudish presents queued steering after synthetic reminders' {
 
 Run: `pwsh -NoProfile -File tests/ccx.Tests.ps1`
 
-Expected: only `Claudish presents queued steering after synthetic reminders` fails because the current bundle has no ordering correction.
+Expected: only `Claudish preserves mid-turn steering messages` fails because the current bundle drops system roles inside message history.
 
 ### Task 2: Update and patch Claudish
 
@@ -47,29 +47,20 @@ Change `claudish` from `7.15.0` to `7.17.1`, temporarily remove the obsolete `pa
 
 Apply every existing ccx-specific hunk from `patches/claudish@7.15.0.patch` to `node_modules/claudish/dist/index.js`. Preserve its invocation-mode, environment isolation, model routing, statusline, workflow usage, and update-check behavior.
 
-- [ ] **Step 3: Add the minimal ordering correction**
+- [ ] **Step 3: Preserve mid-conversation system messages**
 
-Within `processUserMessage`, collect complete synthetic reminder blocks separately and prepend them to genuine content before the formatter emits the user message:
+Within `convertMessagesToOpenAI`, pass message-history system roles through the existing user-message conversion:
 
 ```javascript
-const systemReminderParts = [];
-
-// In the text-block branch:
-const part = { type: "text", text: block.text };
-if (
-  block.text.trim().startsWith("<system-reminder>") &&
-  block.text.trim().endsWith("</system-reminder>")
-) {
-  systemReminderParts.push(part);
-} else {
-  contentParts.push(part);
-}
-
-// After processing blocks, before emitting contentParts:
-contentParts.unshift(...systemReminderParts);
+if (msg.role === "user")
+  processUserMessage(msg, messages, simpleFormat);
+else if (msg.role === "system")
+  processUserMessage(msg, messages, simpleFormat);
+else if (msg.role === "assistant")
+  processAssistantMessage(msg, messages, simpleFormat);
 ```
 
-Tool results remain emitted before the combined text content. No launcher, hook, terminal, or queue logic changes.
+Claude Code's initial system prompt remains handled separately. This branch preserves only mid-conversation system messages in `req.messages`. No launcher, hook, terminal, or queue logic changes.
 
 - [ ] **Step 4: Generate the new Bun patch**
 
@@ -83,7 +74,7 @@ Replace the version-specific residue sentence with: `Claudish stores session fil
 
 Run: `pwsh -NoProfile -File tests/ccx.Tests.ps1`
 
-Expected: every test passes, including the new ordering contract.
+Expected: every test passes, including the new mid-turn role contract.
 
 - [ ] **Step 7: Commit the implementation**
 

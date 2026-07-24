@@ -64,4 +64,4 @@ Every invocation explicitly disables Claudish auto approval and passes Claude Co
 
 `ccx` invokes the pinned local Claudish entry point directly with Bun. It does not start or manage a separate local gateway daemon.
 
-Claudish still creates session files under `~/.claudish`; version 7.15.0 may leave Windows `status-*.js` files behind.
+Claudish stores session files under `~/.claudish`.

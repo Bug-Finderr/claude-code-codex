@@ -311,6 +311,11 @@ Test-Case 'OpenAI Responses starts workflow usage from the current request' {
     Assert-True ($source.Contains('usage: { input_tokens: opts.initialInputTokens, output_tokens: 1 }')) 'message_start uses the request estimate'
 }
 
+Test-Case 'Claudish preserves mid-turn steering messages' {
+    $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
+    Assert-True ($source.Contains('else if (msg.role === "system")')) 'mid-conversation system messages reach OpenAI'
+}
+
 Test-Case 'Claudish installs the ccx Agent model hook' {
     $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
     Assert-True ($source.Contains('const agentModelHook = process.env.CCX_AGENT_MODEL_HOOK;')) 'hook path is read from the ccx environment'
