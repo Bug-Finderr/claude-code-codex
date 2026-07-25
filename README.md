@@ -56,7 +56,7 @@ ccx --model gpt-5.6-sol -- --verbose
 
 The pinned Claudish patch classifies mode from its actual stdout handle. Attached positional prompts, flags, and resume flows stay interactive; redirected output and explicit `-p` or `--print` stay headless. `--models-skip-update` also suppresses Claudish's package update check.
 
-The selected OpenAI model remains the main model. A ccx-only `PreToolUse` hook removes Sonnet overrides from ordinary Agent calls so they inherit that model, while explicit Fable and Opus choices remain unchanged. Workflows also keep their explicit task models. OpenAI model IDs use the configured OpenAI endpoint; native Claude IDs use the existing Claude Code subscription login. The task UI and transcript therefore report the model that actually handled each task. OpenAI workflow token rows use Claudish's request-size estimate because exact input usage arrives only when the stream completes.
+The selected OpenAI model remains the main model. A ccx-only `PreToolUse` hook removes Sonnet overrides from ordinary Agent calls so they inherit that model, while explicit Fable and Opus choices remain unchanged. Workflows also keep their explicit task models. OpenAI model IDs use the configured OpenAI endpoint; native Claude IDs prefer `ANTHROPIC_API_KEY` and otherwise use the existing Claude Code subscription login. The task UI and transcript therefore report the model that actually handled each task. OpenAI workflow token rows use Claudish's request-size estimate because exact input usage arrives only when the stream completes.
 
 PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
 
