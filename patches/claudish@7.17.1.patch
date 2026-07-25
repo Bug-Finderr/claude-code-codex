@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 01de419605f773a36665f6cf563585b8897bf4b3..fb8dbbeabe5141fbdce758564534d502e289999e 100644
+index 01de419605f773a36665f6cf563585b8897bf4b3..1df805831a3d951213c253d1e8ad09c352e01483 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -30998,5 +30998,7 @@ function convertMessagesToOpenAI(req, modelId, filterIdentityFn, simpleFormat =
@@ -10,7 +10,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..fb8dbbeabe5141fbdce758564534d502
        else if (msg.role === "assistant")
          processAssistantMessage(msg, messages, simpleFormat);
      }
-@@ -38194,7 +38196,7 @@ data: ${JSON.stringify(data)}
+@@ -38367,7 +38369,7 @@ data: ${JSON.stringify(data)}
            model: opts.modelName,
            stop_reason: null,
            stop_sequence: null,
