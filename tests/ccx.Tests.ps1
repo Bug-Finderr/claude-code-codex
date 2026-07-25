@@ -307,8 +307,16 @@ exit /b 0
 
 Test-Case 'OpenAI Responses starts workflow usage from the current request' {
     $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
+    $ollamaStart = $source.IndexOf('function createOllamaJsonlStream')
+    $responsesStart = $source.IndexOf('function createResponsesStreamHandler')
+    $responsesEnd = $source.IndexOf('var init_openai_responses_sse', $responsesStart)
+    Assert-True ($ollamaStart -ge 0 -and $responsesStart -gt $ollamaStart -and $responsesEnd -gt $responsesStart) 'stream handlers are present in the expected order'
+
+    $ollama = $source.Substring($ollamaStart, $responsesStart - $ollamaStart)
+    $responses = $source.Substring($responsesStart, $responsesEnd - $responsesStart)
     Assert-True ($source.Contains('initialInputTokens: estimateTokens(JSON.stringify(claudeRequest))')) 'request token estimate is passed to the stream'
-    Assert-True ($source.Contains('usage: { input_tokens: opts.initialInputTokens, output_tokens: 1 }')) 'message_start uses the request estimate'
+    Assert-True ($responses.Contains('usage: { input_tokens: opts.initialInputTokens, output_tokens: 1 }')) 'Responses message_start uses the request estimate'
+    Assert-True ($ollama.Contains('usage: { input_tokens: 100, output_tokens: 1 }')) 'Ollama keeps its supported default usage'
 }
 
 Test-Case 'Claudish preserves mid-turn steering messages' {
