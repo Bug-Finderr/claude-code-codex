@@ -60,7 +60,7 @@ The selected OpenAI model remains the main model. A ccx-only `PreToolUse` hook r
 
 PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
 
-Every invocation explicitly disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag directly before the passthrough separator. It temporarily sets the selected OpenAI key and base URL plus Claudish isolation variables, removes inherited Anthropic credentials, and restores the parent environment afterward. The dependency patch removes the OpenAI key before Claude Code is spawned, after Claudish has read it for its local translator.
+Every invocation explicitly disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag directly before the passthrough separator. It temporarily sets the selected OpenAI key and base URL plus Claudish isolation variables, retains `ANTHROPIC_API_KEY` for native Claude routes, removes `ANTHROPIC_AUTH_TOKEN`, and restores the parent environment afterward. The dependency patch removes both provider keys before Claude Code is spawned, after Claudish has read them for its local translator.
 
 `ccx` invokes the pinned local Claudish entry point directly with Bun. It does not start or manage a separate local gateway daemon.
 

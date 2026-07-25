@@ -72,7 +72,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             [Environment]::SetEnvironmentVariable($name, $parent[$name], 'Process')
         }
         $PSNativeCommandUseErrorActionPreference = $true
-        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:CCX_AGENT_MODEL_HOOK -like "*agent-model-hook.ps1"), (-not [bool]$env:ANTHROPIC_API_KEY), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
+        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:CCX_AGENT_MODEL_HOOK -like "*agent-model-hook.ps1"), ($env:ANTHROPIC_API_KEY -eq "parent-anthropic-key"), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
         $oldTestExit = $env:CCX_TEST_EXIT
         $env:CCX_TEST_EXIT = [string]$ExitCode
         try {
@@ -322,6 +322,17 @@ Test-Case 'OpenAI Responses starts workflow usage from the current request' {
 Test-Case 'Claudish preserves mid-turn steering messages' {
     $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
     Assert-True ($source.Contains('else if (msg.role === "system")')) 'mid-conversation system messages reach OpenAI'
+}
+
+Test-Case 'Claudish prefers the configured Anthropic API key for native models' {
+    $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
+    $nativeStart = $source.IndexOf('class NativeHandler')
+    $nativeEnd = $source.IndexOf('function trimForLog', $nativeStart)
+    Assert-True ($nativeStart -ge 0 -and $nativeEnd -gt $nativeStart) 'native handler is present'
+
+    $native = $source.Substring($nativeStart, $nativeEnd - $nativeStart)
+    Assert-True ($native.Contains('if (this.apiKey) {')) 'configured API key has an explicit precedence branch'
+    Assert-True ($native.Contains('headers["x-api-key"] = this.apiKey;')) 'configured API key authenticates the upstream request'
 }
 
 Test-Case 'Claudish installs the ccx Agent model hook' {
