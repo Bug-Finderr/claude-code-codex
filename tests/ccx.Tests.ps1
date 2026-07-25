@@ -72,7 +72,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             [Environment]::SetEnvironmentVariable($name, $parent[$name], 'Process')
         }
         $PSNativeCommandUseErrorActionPreference = $true
-        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:CCX_AGENT_MODEL_HOOK -like "*agent-model-hook.ps1"), (-not [bool]$env:ANTHROPIC_API_KEY), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
+        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:CCX_AGENT_MODEL_HOOK -like "*agent-model-hook.ps1"), ($env:ANTHROPIC_API_KEY -eq "parent-anthropic-key"), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
         $oldTestExit = $env:CCX_TEST_EXIT
         $env:CCX_TEST_EXIT = [string]$ExitCode
         try {
@@ -237,9 +237,31 @@ Test-Case 'patched real Claudish configures the Claude child environment' {
     try {
         $fakeClaude = Join-Path $testDrive 'claude.cmd'
         $environmentCapturePath = Join-Path $testDrive 'claude-env.txt'
+        $upstreamCapturePath = Join-Path $testDrive 'upstream-headers.json'
         $settingsCapturePath = Join-Path $testDrive 'claude-settings.json'
         $userSettingsPath = Join-Path $testDrive 'user-settings.json'
+        $fakeRequestScript = Join-Path $testDrive 'request.js'
+        $preloadScript = Join-Path $testDrive 'preload.js'
         Set-Content -LiteralPath $userSettingsPath -Value '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo user"}]}]}}'
+        Set-Content -LiteralPath $fakeRequestScript -Value @'
+const response = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
+  method: "POST",
+  headers: { "content-type": "application/json", authorization: "Bearer fake-oauth" },
+  body: JSON.stringify({ model: "claude-fable-5", max_tokens: 1, messages: [{ role: "user", content: "OK" }] }),
+});
+if (!response.ok) process.exit(1);
+'@
+        Set-Content -LiteralPath $preloadScript -Value @'
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = typeof input === "string" ? input : input.url;
+  if (url === "https://api.anthropic.com/v1/messages") {
+    await Bun.write(process.env.CCX_UPSTREAM_CAPTURE_PATH, JSON.stringify(Object.fromEntries(new Headers(init.headers))));
+    return Response.json({ id: "msg_test", type: "message", role: "assistant", model: "claude-fable-5", content: [{ type: "text", text: "OK" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } });
+  }
+  return realFetch(input, init);
+};
+'@
         Set-Content -LiteralPath $fakeClaude -Encoding ascii -Value @'
 @echo off
 if defined OPENAI_API_KEY (
@@ -264,7 +286,8 @@ if /i "%~1"=="--settings" copy /y "%~2" "%CCX_SETTINGS_CAPTURE_PATH%" >nul
 shift
 goto args
 :done
-exit /b 0
+bun "%CCX_FAKE_REQUEST_SCRIPT%"
+exit /b %ERRORLEVEL%
 '@
         foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
         $env:CLAUDE_PATH = $fakeClaude
@@ -275,8 +298,14 @@ exit /b 0
         $oldSettingsCapturePath = $env:CCX_SETTINGS_CAPTURE_PATH
         $env:CCX_ENV_CAPTURE_PATH = $environmentCapturePath
         $env:CCX_SETTINGS_CAPTURE_PATH = $settingsCapturePath
+        $oldUpstreamCapturePath = $env:CCX_UPSTREAM_CAPTURE_PATH
+        $oldFakeRequestScript = $env:CCX_FAKE_REQUEST_SCRIPT
+        $oldAnthropicApiKey = $env:ANTHROPIC_API_KEY
+        $env:CCX_UPSTREAM_CAPTURE_PATH = $upstreamCapturePath
+        $env:CCX_FAKE_REQUEST_SCRIPT = $fakeRequestScript
+        $env:ANTHROPIC_API_KEY = 'fake-anthropic-key'
         try {
-            $claudishArgs = @(Get-ClaudishArguments `
+            $claudishArgs = @('--preload', $preloadScript) + @(Get-ClaudishArguments `
                 -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
                 -Model 'gpt-5.6-sol' `
                 -ClaudeArgs @('-p', 'smoke', '--settings', $userSettingsPath))
@@ -287,6 +316,9 @@ exit /b 0
         } finally {
             $env:CCX_ENV_CAPTURE_PATH = $oldCapturePath
             $env:CCX_SETTINGS_CAPTURE_PATH = $oldSettingsCapturePath
+            $env:CCX_UPSTREAM_CAPTURE_PATH = $oldUpstreamCapturePath
+            $env:CCX_FAKE_REQUEST_SCRIPT = $oldFakeRequestScript
+            $env:ANTHROPIC_API_KEY = $oldAnthropicApiKey
         }
         Assert-Equal $script:CcxExitCode 0 'Claudish smoke exit code'
         Assert-Equal $output.Count 0 'Claudish smoke stdout'
@@ -299,6 +331,9 @@ exit /b 0
         $settings = Get-Content -LiteralPath $settingsCapturePath -Raw | ConvertFrom-Json
         Assert-Equal $settings.hooks.PreToolUse.Count 2 'user and ccx hooks survive settings merge'
         Assert-Sequence @($settings.hooks.PreToolUse.matcher) @('Bash', 'Agent') 'settings hook order'
+        $upstreamHeaders = Get-Content -LiteralPath $upstreamCapturePath -Raw | ConvertFrom-Json
+        Assert-Equal $upstreamHeaders.'x-api-key' 'fake-anthropic-key' 'configured API key reaches Anthropic'
+        Assert-True (-not $upstreamHeaders.PSObject.Properties['authorization']) 'subscription OAuth does not override the API key'
     } finally {
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
         Remove-Item -LiteralPath $testDrive -Recurse -Force
