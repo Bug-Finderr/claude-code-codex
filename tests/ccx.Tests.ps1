@@ -280,6 +280,7 @@ if defined ANTHROPIC_AUTH_TOKEN (
   >>"%CCX_ENV_CAPTURE_PATH%" echo(anthropic-token-absent
 )
 >>"%CCX_ENV_CAPTURE_PATH%" echo(context-window-%CLAUDE_CODE_MAX_CONTEXT_TOKENS%
+>>"%CCX_ENV_CAPTURE_PATH%" echo(compact-window-%CLAUDE_CODE_AUTO_COMPACT_WINDOW%
 :args
 if "%~1"=="" goto done
 if /i "%~1"=="--settings" copy /y "%~2" "%CCX_SETTINGS_CAPTURE_PATH%" >nul
@@ -326,7 +327,8 @@ exit /b %ERRORLEVEL%
             'openai-absent',
             'anthropic-key-absent',
             'anthropic-token-absent',
-            'context-window-1050000'
+            'context-window-1050000',
+            'compact-window-1050000'
         ) 'Claude child auth environment'
         $settings = Get-Content -LiteralPath $settingsCapturePath -Raw | ConvertFrom-Json
         Assert-Equal $settings.hooks.PreToolUse.Count 2 'user and ccx hooks survive settings merge'
@@ -350,8 +352,8 @@ Test-Case 'OpenAI Responses starts workflow usage from the current request' {
     $ollama = $source.Substring($ollamaStart, $responsesStart - $ollamaStart)
     $responses = $source.Substring($responsesStart, $responsesEnd - $responsesStart)
     Assert-True ($source.Contains('initialInputTokens: estimateTokens(JSON.stringify(claudeRequest))')) 'request token estimate is passed to the stream'
-    Assert-True ($responses.Contains('usage: { input_tokens: opts.initialInputTokens, output_tokens: 1 }')) 'Responses message_start uses the request estimate'
-    Assert-True ($ollama.Contains('usage: { input_tokens: 100, output_tokens: 1 }')) 'Ollama keeps its supported default usage'
+    Assert-True ($responses.Contains('usage: messageStartUsage(opts.initialInputTokens)')) 'Responses message_start uses the request estimate'
+    Assert-True ($ollama.Contains('usage: messageStartUsage(opts.priorInputTokens)')) 'Ollama keeps upstream usage accounting'
 }
 
 Test-Case 'Claudish preserves mid-turn steering messages' {

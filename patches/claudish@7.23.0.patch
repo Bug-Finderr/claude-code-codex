@@ -1,8 +1,20 @@
+diff --git a/node_modules/claudish/.bun-tag-2e6270b6ba8ab8c0 b/.bun-tag-2e6270b6ba8ab8c0
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/claudish/.bun-tag-5b7dcb494d5371a7 b/.bun-tag-5b7dcb494d5371a7
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/claudish/.bun-tag-9ecec9f59918fda b/.bun-tag-9ecec9f59918fda
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/claudish/.bun-tag-d6d6c99b6a9e1e4d b/.bun-tag-d6d6c99b6a9e1e4d
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/index.js b/dist/index.js
-index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a78e43750 100644
+index a9d01cd18a97a51010b6fefc0734537868741e95..781cbb4de2509603f6df17b6dac2152ba180d922 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -30997,6 +30997,8 @@ ${msg}`;
+@@ -33436,6 +33436,8 @@ ${msg}`;
      for (const msg of req.messages) {
        if (msg.role === "user")
          processUserMessage(msg, messages, simpleFormat);
@@ -11,16 +23,16 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
        else if (msg.role === "assistant")
          processAssistantMessage(msg, messages, simpleFormat);
      }
-@@ -38367,7 +38369,7 @@ data: ${JSON.stringify(data)}
+@@ -38897,7 +38899,7 @@ data: ${JSON.stringify(data)}
            model: opts.modelName,
            stop_reason: null,
            stop_sequence: null,
--          usage: { input_tokens: 100, output_tokens: 1 }
-+          usage: { input_tokens: opts.initialInputTokens, output_tokens: 1 }
+-          usage: messageStartUsage(opts.priorInputTokens)
++          usage: messageStartUsage(opts.initialInputTokens)
          }
        });
        send("ping", { type: "ping" });
-@@ -38761,7 +38763,7 @@ class TokenTracker {
+@@ -39306,7 +39308,7 @@ class TokenTracker {
      try {
        const total = inputTokens + outputTokens;
        const cw = this.config.contextWindow;
@@ -29,15 +41,15 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
        const pricing = this.getPricing();
        const isFreeModel = pricing.isFree || pricing.inputCostPer1M === 0 && pricing.outputCostPer1M === 0;
        const data = {
-@@ -39287,6 +39289,7 @@ class ComposedHandler {
+@@ -39908,6 +39910,7 @@ class ComposedHandler {
          return createResponsesStreamHandler(c, response, {
            modelName: this.bareModelName,
            onTokenUpdate,
 +          initialInputTokens: estimateTokens(JSON.stringify(claudeRequest)),
            toolNameMap: adapter.getToolNameMap(),
            contextWindow: lookupModelForProvider(this.bareModelName, this.provider.name),
-           onApiError
-@@ -40213,18 +40216,15 @@ class NativeHandler {
+           onApiError,
+@@ -40841,18 +40844,15 @@ class NativeHandler {
        "Content-Type": "application/json",
        "anthropic-version": originalHeaders["anthropic-version"] || "2023-06-01"
      };
@@ -63,7 +75,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
        if (fallbackKey) {
          headers["x-api-key"] = fallbackKey;
        }
-@@ -44085,9 +44085,9 @@ async function createProxyServer(port, _openrouterApiKey, model, monitorMode = f
+@@ -44172,9 +44172,9 @@ async function createProxyServer(port, _openrouterApiKey, model, monitorMode = f
        } else if (req.includes("haiku") && modelMap.haiku) {
          target = modelMap.haiku;
          wasFromModelMap = true;
@@ -75,8 +87,8 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
        target = model;
      }
      const invocationMode = detectInvocationMode(target, wasFromModelMap);
-@@ -44264,8 +44264,10 @@ ${plan.hint}` : `[Route] ${plan.reason}`;
-   const resolvedPort = typeof addr === "object" && addr?.port ? addr.port : port;
+@@ -44360,8 +44360,10 @@ ${plan.hint}` : `[Route] ${plan.reason}`;
+   const resolvedPort = server.port ?? port;
    log(`[Proxy] Server started on port ${resolvedPort}`);
    warmPricingCache().catch(() => {});
 -  warmRecommendedModels().catch(() => {});
@@ -88,7 +100,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
    return {
      port: resolvedPort,
      url: `http://127.0.0.1:${resolvedPort}`,
-@@ -62568,6 +62570,7 @@ async function parseArgs(args) {
+@@ -62810,6 +62812,7 @@ async function parseArgs(args) {
      stdin: false,
      freeOnly: false,
      noLogs: false,
@@ -96,7 +108,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
      diagMode: "auto",
      claudeArgs: []
    };
-@@ -62706,6 +62709,8 @@ async function parseArgs(args) {
+@@ -62948,6 +62951,8 @@ async function parseArgs(args) {
        config3.forceUpdate = true;
      } else if (arg === "--models-skip-update") {
        config3.skipModelsUpdate = true;
@@ -105,7 +117,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
      } else if (arg === "--profile") {
        const profileArg = args[++i];
        if (!profileArg) {
-@@ -62862,7 +62867,7 @@ Usage:  claudish --models --provider <slug>`);
+@@ -63106,7 +63111,7 @@ Usage:  claudish --models --provider <slug>`);
      } else if (arg === "--") {
        const rest = args.slice(i + 1);
        config3.claudeArgs.push(...rest);
@@ -114,7 +126,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
          config3._hasPositionalPrompt = true;
        break;
      } else if (arg.startsWith("-")) {
-@@ -62880,7 +62885,7 @@ Usage:  claudish --models --provider <slug>`);
+@@ -63124,7 +63129,7 @@ Usage:  claudish --models --provider <slug>`);
      i++;
    }
    if (!config3._hasPositionalPrompt && !config3.stdin && !config3._hasPrintFlag) {
@@ -123,14 +135,16 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
    }
    if (config3._sawVerbose && !config3.interactive && !config3.claudeArgs.includes("--verbose") && !config3.claudeArgs.includes("-v")) {
      config3.claudeArgs.push("--verbose");
-@@ -63824,4 +63829,5 @@ ${h("MODEL MAPPING")} ${dim("(per-role override)")}
- ${h("MODEL MAPPING")} ${dim("(per-role override)")}
+@@ -64063,6 +64068,7 @@ ${h("MODEL DISCOVERY")}
+                                           ${dim2("a real 1-token request (may incur tiny cost)")}
+   ${green("--no-probe")}                            Skip live requests, show static chain only
+   ${green("--probe-timeout")} ${yellow("<secs>")}                 Per-link timeout for live probes (default: 40)
 +  ${green("--preserve-request-models")}             Route each request to its resolved model (hybrid)
-   ${green("--model-opus")} ${yellow("<model>")}      Model for Opus role (planning, complex tasks)
-   ${green("--model-sonnet")} ${yellow("<model>")}    Model for Sonnet role (default coding)
-   ${green("--model-haiku")} ${yellow("<model>")}     Model for Haiku role (fast tasks, background)
-@@ -71485,7 +71491,7 @@ function hasNativeAnthropicMapping(config3) {
-   return models.some((m) => m && parseModelSpec(m).provider === "native-anthropic");
+   ${green("--models-refresh")}                      Force refresh the slim model catalog from Firebase
+   ${green("--models-skip-update")}                  Skip the launcher catalog warm step (offline)
+   ${green("--json")}                                JSON output (with --models / --models-top / --probe)
+@@ -71807,7 +71813,7 @@ function wantsAnthropicApiBilling(config3) {
+   }
  }
  function isProxyAuthMode(config3) {
 -  return !config3.monitor && !hasNativeAnthropicMapping(config3);
@@ -138,7 +152,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
  }
  function managedSettingsPath() {
    if (isWindows2()) {
-@@ -71631,17 +71637,28 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode) {
+@@ -71953,17 +71959,29 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode) {
      const formatTokensBash = `fmt_tok() { local n=\${1:-0}; if [ "$n" -ge 1000000 ]; then echo "$((n/1000000))M"; elif [ "$n" -ge 1000 ]; then echo "$((n/1000))k"; else echo "$n"; fi; }`;
      statusCommand = `JSON=$(cat) && DIR=$(basename "$(pwd)") && [ \${#DIR} -gt 15 ] && DIR="\${DIR:0:12}..." || true && CTX=-1 && COST="0" && IS_FREE="false" && IS_EST="false" && PROVIDER="" && TOKEN_MODEL="" && IN_TOK=0 && CTX_WIN=0 && ${formatTokensBash} && if [ -f "${tokenFilePath}" ]; then TOKENS=$(cat "${tokenFilePath}" 2>/dev/null | tr -d ' \\n') && REAL_CTX=$(echo "$TOKENS" | grep -o '"context_left_percent":-\\?[0-9]*' | grep -o '\\-\\?[0-9]*') && if [ ! -z "$REAL_CTX" ]; then CTX="$REAL_CTX"; fi && REAL_COST=$(echo "$TOKENS" | grep -o '"total_cost":[0-9.]*' | cut -d: -f2) && if [ ! -z "$REAL_COST" ]; then COST="$REAL_COST"; fi && IN_TOK=$(echo "$TOKENS" | grep -o '"input_tokens":[0-9]*' | grep -o '[0-9]*') && CTX_WIN=$(echo "$TOKENS" | grep -o '"context_window":[0-9]*' | grep -o '[0-9]*') && IS_FREE=$(echo "$TOKENS" | grep -o '"is_free":[a-z]*' | cut -d: -f2) && IS_EST=$(echo "$TOKENS" | grep -o '"is_estimated":[a-z]*' | cut -d: -f2) && PROVIDER=$(echo "$TOKENS" | grep -o '"provider_name":"[^"]*"' | cut -d'"' -f4) && TOKEN_MODEL=$(echo "$TOKENS" | grep -o '"model_name":"[^"]*"' | cut -d'"' -f4); fi && if [ "$CLAUDISH_IS_LOCAL" = "true" ]; then COST_DISPLAY="LOCAL"; elif [ "$IS_FREE" = "true" ]; then COST_DISPLAY="FREE"; elif [ "$IS_EST" = "true" ]; then COST_DISPLAY=$(printf "~\\$%.3f" "$COST"); else COST_DISPLAY=$(printf "\\$%.3f" "$COST"); fi && MODEL_DISPLAY="\${TOKEN_MODEL:-$CLAUDISH_ACTIVE_MODEL_NAME}" && if [ ! -z "$PROVIDER" ]; then MODEL_DISPLAY="$PROVIDER $MODEL_DISPLAY"; fi && if [ "$CTX" -lt 0 ] 2>/dev/null || [ "$CTX_WIN" -le 0 ] 2>/dev/null; then if [ "$IN_TOK" -gt 0 ] 2>/dev/null; then CTX_DISPLAY="$(fmt_tok $IN_TOK) tokens"; else CTX_DISPLAY="N/A"; fi; elif [ "$IN_TOK" -gt 0 ] 2>/dev/null && [ "$CTX_WIN" -gt 0 ] 2>/dev/null; then CTX_DISPLAY="$CTX% ($(fmt_tok $IN_TOK)/$(fmt_tok $CTX_WIN))"; else CTX_DISPLAY="$CTX%"; fi && printf "${CYAN4}${BOLD4}%s${RESET4} ${DIM4}\u2022${RESET4} ${YELLOW3}%s${RESET4} ${DIM4}\u2022${RESET4} ${GREEN4}%s${RESET4} ${DIM4}\u2022${RESET4} ${MAGENTA3}%s${RESET4}\\n" "$DIR" "$MODEL_DISPLAY" "$COST_DISPLAY" "$CTX_DISPLAY"`;
    }
@@ -150,7 +164,8 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
    };
 +  try {
 +    const configured = JSON.parse(readFileSync21(join25(homeDir, ".claude", "settings.json"), "utf-8")).statusLine;
-+    if (configured?.command) statusLine = configured;
++    if (configured?.command)
++      statusLine = configured;
 +  } catch {}
    const settings = buildClaudishSettingsOverlay(statusLine, proxyAuthMode);
    writeFileSync17(tempPath, JSON.stringify(settings, null, 2), "utf-8");
@@ -168,7 +183,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
    if (proxyAuthMode) {
      settings.forceLoginMethod = "console";
    }
-@@ -71654,6 +71671,7 @@ function mergeUserSettingsIfPresent(config3, tempSettingsPath, statusLine, proxy
+@@ -71976,6 +71994,7 @@ function mergeUserSettingsIfPresent(config3, tempSettingsPath, statusLine, proxy
    }
    const userSettingsValue = config3.claudeArgs[idx + 1];
    try {
@@ -176,7 +191,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
      let userSettings;
      if (userSettingsValue.trimStart().startsWith("{")) {
        userSettings = JSON.parse(userSettingsValue);
-@@ -71661,7 +71679,11 @@ function mergeUserSettingsIfPresent(config3, tempSettingsPath, statusLine, proxy
+@@ -71983,7 +72002,11 @@ function mergeUserSettingsIfPresent(config3, tempSettingsPath, statusLine, proxy
        const rawUserSettings = readFileSync21(userSettingsValue, "utf-8");
        userSettings = JSON.parse(rawUserSettings);
      }
@@ -189,7 +204,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
      if (!("disableClaudeAiConnectors" in userSettings)) {
        userSettings.disableClaudeAiConnectors = true;
      }
-@@ -71741,12 +71763,16 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -72063,13 +72086,19 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
    }
    const isLocalModel2 = modelId ? modelId.startsWith("ollama/") || modelId.startsWith("ollama:") || modelId.startsWith("lmstudio/") || modelId.startsWith("lmstudio:") || modelId.startsWith("vllm/") || modelId.startsWith("vllm:") || modelId.startsWith("mlx/") || modelId.startsWith("mlx:") || modelId.startsWith("http://") || modelId.startsWith("https://") : false;
    const modelDisplayName = modelId || config3.profile || "default";
@@ -201,21 +216,30 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
      [ENV.CLAUDISH_ACTIVE_MODEL_NAME]: modelDisplayName,
      CLAUDISH_IS_LOCAL: isLocalModel2 ? "true" : "false"
    };
-+  if (contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextWindow);
+-  let hidAnthropicApiKey = false;
++  if (contextWindow) {
++    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextWindow);
++    env[ENV.CLAUDE_CODE_AUTO_COMPACT_WINDOW] ??= String(contextWindow);
++  }
 +  delete env.OPENAI_API_KEY;
    delete env.CLAUDECODE;
    if (config3.monitor) {
      delete env.ANTHROPIC_API_KEY;
-@@ -71760,7 +71786,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -72083,12 +72112,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
        env[ENV.ANTHROPIC_MODEL] = modelId;
        env[ENV.ANTHROPIC_SMALL_FAST_MODEL] = modelId;
      }
--    if (hasNativeAnthropicMapping(config3)) {} else {
-+    if (!proxyAuthMode) {} else {
-       env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "sk-ant-api03-placeholder-not-used-proxy-handles-auth-with-openrouter-key-xxxxxxxxxxxxxxxxxxxxx";
-       env.ANTHROPIC_AUTH_TOKEN = process.env.ANTHROPIC_AUTH_TOKEN || "placeholder-token-not-used-proxy-handles-auth";
+-    if (hasNativeAnthropicMapping(config3)) {
+-      if (process.env.ANTHROPIC_API_KEY && !wantsAnthropicApiBilling(config3)) {
+-        delete env.ANTHROPIC_API_KEY;
+-        hidAnthropicApiKey = true;
+-      }
+-    } else {
++    if (proxyAuthMode) {
+       env.ANTHROPIC_API_KEY = "sk-ant-api03-placeholder-not-used-proxy-handles-auth-with-openrouter-key-xxxxxxxxxxxxxxxxxxxxx";
+       env.ANTHROPIC_AUTH_TOKEN = "placeholder-token-not-used-proxy-handles-auth";
        if (!process.env[ENV.CLAUDE_CODE_AUTO_COMPACT_WINDOW]) {
-@@ -71774,6 +71800,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -72104,6 +72128,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
        }
      }
    }
@@ -223,18 +247,17 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
    const log2 = (message) => {
      if (!config3.quiet) {
        if (config3.interactive) {
-@@ -71783,8 +71810,8 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
-       }
-     }
+@@ -72115,9 +72140,6 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
    };
--  if (!config3.monitor && hasNativeAnthropicMapping(config3)) {
--    log2("[claudish] Native Claude model detected \u2014 using Claude Code subscription credentials");
-+  if (!config3.monitor && !proxyAuthMode) {
-+    log2("[claudish] Native model routing enabled - using Claude Code subscription credentials");
+   if (!config3.monitor && hasNativeAnthropicMapping(config3)) {
+     log2("[claudish] Native Claude model detected \u2014 using Claude Code subscription credentials");
+-    if (hidAnthropicApiKey) {
+-      log2("[claudish]   ANTHROPIC_API_KEY found but hidden so it can't override that subscription \xB7 " + "use --anthropic-api-billing (or anthropicApiBilling: true) to bill the API instead");
+-    }
    }
    if (config3.interactive) {
      log2(`
-@@ -72770,7 +72797,7 @@ Team Status`);
+@@ -73133,7 +73155,7 @@ Team Status`);
          console.log(`[claudish] Debug log: ${logFile}`);
        }
      }
@@ -243,7 +266,7 @@ index 01de419605f773a36665f6cf563585b8897bf4b3..d4d1e3827cf6f1a5d997fe2ec9c26e6a
        await traceSpan("startup:update-check", () => checkForUpdates2(getVersion4(), { quiet: cliConfig.quiet }));
      }
      if (!await traceSpan("startup:claude-detect", () => checkClaudeInstalled2())) {
-@@ -72869,7 +72896,9 @@ Team Status`);
+@@ -73232,7 +73254,9 @@ Team Status`);
        quiet: cliConfig.quiet,
        isInteractive: cliConfig.interactive,
        advisorModels: cliConfig.advisorModels,
