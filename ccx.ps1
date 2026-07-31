@@ -90,7 +90,6 @@ function Invoke-CcxCommand {
         OPENAI_BASE_URL = $OpenAIBaseUrl
         CLAUDISH_STATS = 'off'
         CLAUDISH_TELEMETRY = '0'
-        CCX_AGENT_MODEL_HOOK = Join-Path $PSScriptRoot 'agent-model-hook.ps1'
         ANTHROPIC_AUTH_TOKEN = $null
     }
     $savedEnvironment = @{}
