@@ -49,7 +49,6 @@ $temporaryEnvironmentNames = @(
     'OPENAI_BASE_URL',
     'CLAUDISH_STATS',
     'CLAUDISH_TELEMETRY',
-    'CCX_AGENT_MODEL_HOOK',
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_AUTH_TOKEN'
 )
@@ -61,7 +60,6 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
         OPENAI_BASE_URL = 'https://parent.invalid'
         CLAUDISH_STATS = 'parent-stats'
         CLAUDISH_TELEMETRY = 'parent-telemetry'
-        CCX_AGENT_MODEL_HOOK = 'parent-hook'
         ANTHROPIC_API_KEY = 'parent-anthropic-key'
         ANTHROPIC_AUTH_TOKEN = 'parent-anthropic-token'
     }
@@ -72,7 +70,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             [Environment]::SetEnvironmentVariable($name, $parent[$name], 'Process')
         }
         $PSNativeCommandUseErrorActionPreference = $true
-        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:CCX_AGENT_MODEL_HOOK -like "*agent-model-hook.ps1"), ($env:ANTHROPIC_API_KEY -eq "parent-anthropic-key"), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
+        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:ANTHROPIC_API_KEY -eq "parent-anthropic-key"), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
         $oldTestExit = $env:CCX_TEST_EXIT
         $env:CCX_TEST_EXIT = [string]$ExitCode
         try {
@@ -85,7 +83,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             $env:CCX_TEST_EXIT = $oldTestExit
         }
 
-        Assert-Sequence $output @('True|True|True|True|True|True|True') 'translator environment'
+        Assert-Sequence $output @('True|True|True|True|True|True') 'translator environment'
         Assert-Equal $script:CcxExitCode $ExitCode 'child exit code'
         Assert-True $PSNativeCommandUseErrorActionPreference 'caller native error preference is unchanged'
         foreach ($name in $temporaryEnvironmentNames) {
@@ -238,6 +236,7 @@ Test-Case 'patched real Claudish configures the Claude child environment' {
         $fakeClaude = Join-Path $testDrive 'claude.cmd'
         $environmentCapturePath = Join-Path $testDrive 'claude-env.txt'
         $upstreamCapturePath = Join-Path $testDrive 'upstream-headers.json'
+        $agentCapturePath = Join-Path $testDrive 'agent-inputs.json'
         $settingsCapturePath = Join-Path $testDrive 'claude-settings.json'
         $userSettingsPath = Join-Path $testDrive 'user-settings.json'
         $fakeRequestScript = Join-Path $testDrive 'request.js'
@@ -250,6 +249,33 @@ const response = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
   body: JSON.stringify({ model: "claude-fable-5", max_tokens: 1, messages: [{ role: "user", content: "OK" }] }),
 });
 if (!response.ok) process.exit(1);
+
+const agentInput = async (model) => {
+  const response = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "oai@gpt-5.6-sol",
+      max_tokens: 64,
+      messages: [{ role: "user", content: `delegate ${model}` }],
+      tools: [{
+        name: "Agent",
+        description: "Delegate work",
+        input_schema: { type: "object", properties: { model: { type: "string" } } },
+      }],
+    }),
+  });
+  const deltas = (await response.text()).split("\n")
+    .filter((line) => line.startsWith("data: "))
+    .map((line) => JSON.parse(line.slice(6)))
+    .filter((event) => event.type === "content_block_delta" && event.delta.type === "input_json_delta")
+    .map((event) => event.delta.partial_json);
+  return JSON.parse(deltas.join(""));
+};
+await Bun.write(process.env.CCX_AGENT_CAPTURE_PATH, JSON.stringify([
+  await agentInput("sonnet"),
+  await agentInput("fable"),
+]));
 '@
         Set-Content -LiteralPath $preloadScript -Value @'
 const realFetch = globalThis.fetch;
@@ -258,6 +284,22 @@ globalThis.fetch = async (input, init) => {
   if (url === "https://api.anthropic.com/v1/messages") {
     await Bun.write(process.env.CCX_UPSTREAM_CAPTURE_PATH, JSON.stringify(Object.fromEntries(new Headers(init.headers))));
     return Response.json({ id: "msg_test", type: "message", role: "assistant", model: "claude-fable-5", content: [{ type: "text", text: "OK" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } });
+  }
+  if (url === "https://api.openai.com/v1/responses") {
+    const request = JSON.parse(init.body);
+    const toolName = request.tools[0].name;
+    const model = JSON.stringify(request.input).includes("fable") ? "fable" : "sonnet";
+    const callId = `call_${model}`;
+    const args = JSON.stringify({ description: "probe", prompt: "reply ok", model });
+    const events = [
+      { type: "response.output_item.added", item: { type: "function_call", id: `fc_${callId}`, call_id: callId, name: toolName } },
+      { type: "response.function_call_arguments.delta", call_id: callId, delta: args },
+      { type: "response.output_item.done", item: { type: "function_call", id: `fc_${callId}`, call_id: callId, name: toolName, arguments: args } },
+      { type: "response.completed", response: { usage: { input_tokens: 10, output_tokens: 5 } } },
+    ];
+    return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") + "data: [DONE]\n\n", {
+      headers: { "content-type": "text/event-stream" },
+    });
   }
   return realFetch(input, init);
 };
@@ -301,9 +343,11 @@ exit /b %ERRORLEVEL%
         $env:CCX_SETTINGS_CAPTURE_PATH = $settingsCapturePath
         $oldUpstreamCapturePath = $env:CCX_UPSTREAM_CAPTURE_PATH
         $oldFakeRequestScript = $env:CCX_FAKE_REQUEST_SCRIPT
+        $oldAgentCapturePath = $env:CCX_AGENT_CAPTURE_PATH
         $oldAnthropicApiKey = $env:ANTHROPIC_API_KEY
         $env:CCX_UPSTREAM_CAPTURE_PATH = $upstreamCapturePath
         $env:CCX_FAKE_REQUEST_SCRIPT = $fakeRequestScript
+        $env:CCX_AGENT_CAPTURE_PATH = $agentCapturePath
         $env:ANTHROPIC_API_KEY = 'fake-anthropic-key'
         try {
             $claudishArgs = @('--preload', $preloadScript) + @(Get-ClaudishArguments `
@@ -319,6 +363,7 @@ exit /b %ERRORLEVEL%
             $env:CCX_SETTINGS_CAPTURE_PATH = $oldSettingsCapturePath
             $env:CCX_UPSTREAM_CAPTURE_PATH = $oldUpstreamCapturePath
             $env:CCX_FAKE_REQUEST_SCRIPT = $oldFakeRequestScript
+            $env:CCX_AGENT_CAPTURE_PATH = $oldAgentCapturePath
             $env:ANTHROPIC_API_KEY = $oldAnthropicApiKey
         }
         Assert-Equal $script:CcxExitCode 0 'Claudish smoke exit code'
@@ -331,11 +376,14 @@ exit /b %ERRORLEVEL%
             'compact-window-1050000'
         ) 'Claude child auth environment'
         $settings = Get-Content -LiteralPath $settingsCapturePath -Raw | ConvertFrom-Json
-        Assert-Equal $settings.hooks.PreToolUse.Count 2 'user and ccx hooks survive settings merge'
-        Assert-Sequence @($settings.hooks.PreToolUse.matcher) @('Bash', 'Agent') 'settings hook order'
+        Assert-Equal $settings.hooks.PreToolUse.Count 1 'user hook survives settings merge'
+        Assert-Equal $settings.hooks.PreToolUse[0].matcher 'Bash' 'user hook remains unchanged'
         $upstreamHeaders = Get-Content -LiteralPath $upstreamCapturePath -Raw | ConvertFrom-Json
         Assert-Equal $upstreamHeaders.'x-api-key' 'fake-anthropic-key' 'configured API key reaches Anthropic'
         Assert-True (-not $upstreamHeaders.PSObject.Properties['authorization']) 'subscription OAuth does not override the API key'
+        $agentInputs = Get-Content -LiteralPath $agentCapturePath -Raw | ConvertFrom-Json
+        Assert-True (-not $agentInputs[0].PSObject.Properties['model']) 'default Sonnet Agent input inherits the routed main model'
+        Assert-Equal $agentInputs[1].model 'fable' 'explicit Agent model is preserved'
     } finally {
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
         Remove-Item -LiteralPath $testDrive -Recurse -Force
@@ -359,25 +407,6 @@ Test-Case 'OpenAI Responses starts workflow usage from the current request' {
 Test-Case 'Claudish preserves mid-turn steering messages' {
     $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
     Assert-True ($source.Contains('else if (msg.role === "system")')) 'mid-conversation system messages reach OpenAI'
-}
-
-Test-Case 'Claudish installs the ccx Agent model hook' {
-    $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
-    Assert-True ($source.Contains('const agentModelHook = process.env.CCX_AGENT_MODEL_HOOK;')) 'hook path is read from the ccx environment'
-}
-
-Test-Case 'Agent model hook inherits Sonnet and preserves explicit native models' {
-    $hook = Join-Path $root 'agent-model-hook.ps1'
-    Assert-True (Test-Path -LiteralPath $hook) 'Agent model hook exists'
-
-    $sonnet = '{"tool_name":"Agent","tool_input":{"description":"probe","prompt":"reply ok","subagent_type":"general-purpose","model":"sonnet"}}' | & pwsh -NoProfile -File $hook | ConvertFrom-Json
-    Assert-True (-not $sonnet.hookSpecificOutput.updatedInput.PSObject.Properties['model']) 'Sonnet override is removed'
-    Assert-Equal $sonnet.hookSpecificOutput.updatedInput.prompt 'reply ok' 'other Agent input is preserved'
-
-    foreach ($model in 'fable', 'opus') {
-        $output = @('{"tool_name":"Agent","tool_input":{"model":"' + $model + '"}}' | & pwsh -NoProfile -File $hook)
-        Assert-Equal $output.Count 0 "$model passes through unchanged"
-    }
 }
 
 Test-Case 'real Claudish passes redirected stdout handles to fake Claude under assignment and pipeline' {
