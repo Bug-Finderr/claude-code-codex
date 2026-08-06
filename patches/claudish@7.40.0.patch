@@ -1,0 +1,249 @@
+diff --git a/dist/index.js b/dist/index.js
+index f3901bb545ce335ce33e4e7dddec2b186097e0fd..9888e1b6b57fef3c384edf2f35b5249af3ea413d 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -28743,6 +28743,8 @@ ${msg}`;
+         processUserMessage(msg, messages, simpleFormat);
+       else if (msg.role === "assistant")
+         processAssistantMessage(msg, messages, simpleFormat);
++      else if (msg.role === "system")
++        processUserMessage(msg, messages, simpleFormat);
+     }
+   }
+   return messages;
+@@ -39655,7 +39657,7 @@ data: ${JSON.stringify(data)}
+           model: opts.modelName,
+           stop_reason: null,
+           stop_sequence: null,
+-          usage: messageStartUsage(opts.priorInputTokens)
++          usage: messageStartUsage(opts.initialInputTokens)
+         }
+       });
+       send("ping", { type: "ping" });
+@@ -40751,10 +40753,22 @@ class ComposedHandler {
+           toolNameMap: adapter.getToolNameMap(),
+           contextWindow: lookupModelForProvider(this.bareModelName, this.provider.name),
+           onApiError,
+-          priorInputTokens,
++          initialInputTokens: estimateTokens(JSON.stringify(claudeRequest)),
+           middlewareManager: this.middlewareManager,
+-          shouldBufferTool: (name) => behaviorSession?.interceptsTool(name) ?? false,
+-          onToolCall: (name, argsJson) => behaviorSession?.repairToolCall(name, argsJson) ?? null,
++          shouldBufferTool: (name) => name === "Agent" || behaviorSession?.interceptsTool(name) === true,
++          onToolCall: (name, argsJson) => {
++            let normalized = argsJson;
++            if (name === "Agent") {
++              try {
++                const input = JSON.parse(argsJson);
++                if (input.model === "sonnet") {
++                  delete input.model;
++                  normalized = JSON.stringify(input);
++                }
++              } catch {}
++            }
++            return behaviorSession?.repairToolCall(name, normalized) ?? normalized;
++          },
+           onAssistantText: (text, kind) => behaviorSession?.observeText(text, kind),
+           onToolCallObserved: (name) => behaviorSession?.observeToolCall(name),
+           onTurnEnd: () => behaviorSession?.finishTurn()
+@@ -45996,18 +46010,15 @@ class NativeHandler {
+       "Content-Type": "application/json",
+       "anthropic-version": originalHeaders["anthropic-version"] || "2023-06-01"
+     };
+-    if (originalHeaders.authorization) {
++    if (this.apiKey) {
++      headers["x-api-key"] = this.apiKey;
++    } else if (originalHeaders.authorization) {
+       headers.authorization = originalHeaders.authorization;
+-    }
+-    if (originalHeaders["x-api-key"]) {
++    } else if (originalHeaders["x-api-key"]) {
+       headers["x-api-key"] = originalHeaders["x-api-key"];
+-    }
+-    if (!originalHeaders.authorization && !originalHeaders["x-api-key"]) {
+-      let fallbackKey = this.apiKey;
+-      if (!fallbackKey) {
+-        const auth = await credentials.getRequestAuth("native-anthropic", { model: target });
+-        fallbackKey = auth.headers["x-api-key"];
+-      }
++    } else {
++      const auth = await credentials.getRequestAuth("native-anthropic", { model: target });
++      const fallbackKey = auth.headers["x-api-key"];
+       if (fallbackKey) {
+         headers["x-api-key"] = fallbackKey;
+       }
+@@ -48092,9 +48103,9 @@ async function createProxyServer(port, _openrouterApiKey, model, monitorMode = f
+       } else if (req.includes("haiku") && modelMap.haiku) {
+         target = modelMap.haiku;
+         wasFromModelMap = true;
+-      } else if (model)
++      } else if (model && !options.preserveRequestModels)
+         target = model;
+-    } else if (model) {
++    } else if (model && !options.preserveRequestModels) {
+       target = model;
+     }
+     const invocationMode = detectInvocationMode(target, wasFromModelMap);
+@@ -67242,6 +67253,7 @@ async function parseArgs(args) {
+     stdin: false,
+     freeOnly: false,
+     noLogs: false,
++    preserveRequestModels: false,
+     diagMode: "auto",
+     claudeArgs: []
+   };
+@@ -67380,6 +67392,8 @@ async function parseArgs(args) {
+       config3.forceUpdate = true;
+     } else if (arg === "--models-skip-update") {
+       config3.skipModelsUpdate = true;
++    } else if (arg === "--preserve-request-models") {
++      config3.preserveRequestModels = true;
+     } else if (arg === "--profile") {
+       const profileArg = args[++i];
+       if (!profileArg) {
+@@ -67538,7 +67552,7 @@ Usage:  claudish --models --provider <slug>`);
+     } else if (arg === "--") {
+       const rest = args.slice(i + 1);
+       config3.claudeArgs.push(...rest);
+-      if (rest.length > 0)
++      if (!process.stdout.isTTY || rest.includes("-p") || rest.includes("--print"))
+         config3._hasPositionalPrompt = true;
+       break;
+     } else if (arg.startsWith("-")) {
+@@ -67556,7 +67570,7 @@ Usage:  claudish --models --provider <slug>`);
+     i++;
+   }
+   if (!config3._hasPositionalPrompt && !config3.stdin && !config3._hasPrintFlag) {
+-    config3.interactive = true;
++    config3.interactive = Boolean(process.stdout.isTTY);
+   }
+   if (config3._sawVerbose && !config3.interactive && !config3.claudeArgs.includes("--verbose") && !config3.claudeArgs.includes("-v")) {
+     config3.claudeArgs.push("--verbose");
+@@ -68502,6 +68516,7 @@ ${h("MODEL DISCOVERY")}
+                                           ${dim3("a real 1-token request (may incur tiny cost)")}
+   ${green2("--no-probe")}                            Skip live requests, show static chain only
+   ${green2("--probe-timeout")} ${yellow2("<secs>")}                 Per-link timeout for live probes (default: 40)
++  ${green2("--preserve-request-models")}             Route each request to its resolved model (hybrid)
+   ${green2("--models-refresh")}                      Force refresh the slim model catalog from Firebase
+   ${green2("--models-skip-update")}                  Skip the launcher catalog warm step (offline)
+   ${green2("--json")}                                JSON output (with --models / --models-top / --probe)
+@@ -76275,7 +76290,7 @@ function wantsAnthropicApiBilling(config3) {
+   }
+ }
+ function isProxyAuthMode(config3) {
+-  return !config3.monitor && !hasNativeAnthropicMapping(config3);
++  return !config3.monitor && !config3.preserveRequestModels && !hasNativeAnthropicMapping(config3);
+ }
+ function managedSettingsPath() {
+   if (isWindows2()) {
+@@ -76571,11 +76586,14 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode, userStatusLi
+     const segmentNoDir = `if [ -n "$PROVIDER" ]; then ${segmentNoDirWithProvider}; else ${segmentNoDirNoProvider}; fi`;
+     statusCommand = userStatusLineCommand ? buildChainedStatusCommand(userStatusLineCommand, readState, segmentNoDir) : `JSON=$(cat); ${dirPrelude}${readState}; ${segmentWithDir}`;
+   }
+-  const statusLine = {
++  let statusLine = {
+     type: "command",
+     command: statusCommand,
+     padding: 0
+   };
++  if (process.platform === "win32" && userStatusLineCommand) {
++    statusLine = { type: "command", command: userStatusLineCommand, padding: 0 };
++  }
+   const settings = buildClaudishSettingsOverlay(statusLine, proxyAuthMode);
+   writeFileSync19(tempPath, JSON.stringify(settings, null, 2), "utf-8");
+   return { path: tempPath, statusLine, tokenFilePath };
+@@ -76595,7 +76613,9 @@ function mergeUserSettingsIfPresent(config3, tempSettingsPath, statusLine, proxy
+   const userSettingsValue = config3.claudeArgs[idx + 1];
+   try {
+     const userSettings = parseSettingsArg(userSettingsValue);
+-    userSettings.statusLine = statusLine;
++    if (!("statusLine" in userSettings)) {
++      userSettings.statusLine = statusLine;
++    }
+     if (!("disableClaudeAiConnectors" in userSettings)) {
+       userSettings.disableClaudeAiConnectors = true;
+     }
+@@ -76745,6 +76765,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+     CLAUDISH_IS_LOCAL: isLocalModel2 ? "true" : "false",
+     [ENV.CLAUDISH_TOKEN_FILE]: tokenFilePath
+   };
++  delete env.OPENAI_API_KEY;
+   if (modelId) {
+     const parsedSpec = parseModelSpec(modelId);
+     const providerDisplayName = parsedSpec.isExplicitProvider ? getProviderByName(parsedSpec.provider)?.displayName : undefined;
+@@ -76752,7 +76773,6 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+       env[ENV.CLAUDISH_PROVIDER_NAME] = providerDisplayName;
+     }
+   }
+-  let hidAnthropicApiKey = false;
+   delete env.CLAUDECODE;
+   if (config3.monitor) {
+     delete env.ANTHROPIC_API_KEY;
+@@ -76766,26 +76786,22 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+       env[ENV.ANTHROPIC_MODEL] = modelId;
+       env[ENV.ANTHROPIC_SMALL_FAST_MODEL] = modelId;
+     }
+-    if (hasNativeAnthropicMapping(config3)) {
+-      if (process.env.ANTHROPIC_API_KEY && !wantsAnthropicApiBilling(config3)) {
+-        delete env.ANTHROPIC_API_KEY;
+-        hidAnthropicApiKey = true;
+-      }
+-    } else {
++    if (proxyAuthMode) {
+       env.ANTHROPIC_API_KEY = "sk-ant-api03-placeholder-not-used-proxy-handles-auth-with-openrouter-key-xxxxxxxxxxxxxxxxxxxxx";
+       env.ANTHROPIC_AUTH_TOKEN = "placeholder-token-not-used-proxy-handles-auth";
+-      const realWindow = await computeMainThreadContextWindow(config3);
+-      const contextEnv = resolveContextWindowEnv(realWindow, process.env);
+-      Object.assign(env, contextEnv.vars);
+-      try {
+-        const { setSessionContextWindow: setSessionContextWindow2 } = await Promise.resolve().then(() => (init_aggregate(), exports_aggregate));
+-        setSessionContextWindow2(realWindow);
+-      } catch {}
+-      if (contextEnv.notice && !config3.quiet) {
+-        console.error(contextEnv.notice);
+-      }
++    }
++    const realWindow = await computeMainThreadContextWindow(config3);
++    const contextEnv = resolveContextWindowEnv(realWindow, process.env);
++    Object.assign(env, contextEnv.vars);
++    try {
++      const { setSessionContextWindow: setSessionContextWindow2 } = await Promise.resolve().then(() => (init_aggregate(), exports_aggregate));
++      setSessionContextWindow2(realWindow);
++    } catch {}
++    if (contextEnv.notice && !config3.quiet) {
++      console.error(contextEnv.notice);
+     }
+   }
++  delete env.ANTHROPIC_API_KEY;
+   const log2 = (message) => {
+     if (!config3.quiet) {
+       if (config3.interactive) {
+@@ -76797,9 +76813,6 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+   };
+   if (!config3.monitor && hasNativeAnthropicMapping(config3)) {
+     log2("[claudish] Native Claude model detected \u2014 using Claude Code subscription credentials");
+-    if (hidAnthropicApiKey) {
+-      log2("[claudish]   ANTHROPIC_API_KEY found but hidden so it can't override that subscription \xB7 " + "use --anthropic-api-billing (or anthropicApiBilling: true) to bill the API instead");
+-    }
+   }
+   if (config3.interactive) {
+     log2(`
+@@ -77831,7 +77844,7 @@ Team Status`);
+         console.log(`[claudish] Debug log: ${logFile}`);
+       }
+     }
+-    if (cliConfig.interactive && !cliConfig.jsonOutput) {
++    if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate) {
+       await traceSpan("startup:update-check", () => checkForUpdates2(getVersion4(), { quiet: cliConfig.quiet }));
+     }
+     if (!await traceSpan("startup:claude-detect", () => checkClaudeInstalled2())) {
+@@ -77930,7 +77943,8 @@ Team Status`);
+       quiet: cliConfig.quiet,
+       isInteractive: cliConfig.interactive,
+       advisorModels: cliConfig.advisorModels,
+-      advisorCollector: cliConfig.advisorCollector
++      advisorCollector: cliConfig.advisorCollector,
++      preserveRequestModels: cliConfig.preserveRequestModels
+     }));
+     const diag = createDiagOutput2({
+       interactive: cliConfig.interactive,

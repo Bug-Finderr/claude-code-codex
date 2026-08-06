@@ -241,7 +241,7 @@ Test-Case 'patched real Claudish configures the Claude child environment' {
         $userSettingsPath = Join-Path $testDrive 'user-settings.json'
         $fakeRequestScript = Join-Path $testDrive 'request.js'
         $preloadScript = Join-Path $testDrive 'preload.js'
-        Set-Content -LiteralPath $userSettingsPath -Value '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo user"}]}]}}'
+        Set-Content -LiteralPath $userSettingsPath -Value '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo user"}]}]},"statusLine":{"type":"command","command":"configured-statusline","padding":0}}'
         Set-Content -LiteralPath $fakeRequestScript -Value @'
 const response = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
   method: "POST",
@@ -337,6 +337,9 @@ exit /b %ERRORLEVEL%
         $env:HOME = $testDrive
         $env:USERPROFILE = $testDrive
         $env:LOCALAPPDATA = $testDrive
+        $claudishHome = Join-Path $testDrive '.claudish'
+        New-Item -ItemType Directory -Path $claudishHome | Out-Null
+        Set-Content -LiteralPath (Join-Path $claudishHome 'all-models.json') -Value '{"version":2,"lastUpdated":"2026-08-06T00:00:00.000Z","entries":[{"modelId":"gpt-5.6-sol","aliases":["gpt-5.6-sol"],"contextWindow":1050000,"aggregators":[{"provider":"openai","contextWindow":1050000}]}],"models":[]}'
         $oldCapturePath = $env:CCX_ENV_CAPTURE_PATH
         $oldSettingsCapturePath = $env:CCX_SETTINGS_CAPTURE_PATH
         $env:CCX_ENV_CAPTURE_PATH = $environmentCapturePath
@@ -378,6 +381,7 @@ exit /b %ERRORLEVEL%
         $settings = Get-Content -LiteralPath $settingsCapturePath -Raw | ConvertFrom-Json
         Assert-Equal $settings.hooks.PreToolUse.Count 1 'user hook survives settings merge'
         Assert-Equal $settings.hooks.PreToolUse[0].matcher 'Bash' 'user hook remains unchanged'
+        Assert-Equal $settings.statusLine.command 'configured-statusline' 'configured statusline replaces Claudish fallback'
         $upstreamHeaders = Get-Content -LiteralPath $upstreamCapturePath -Raw | ConvertFrom-Json
         Assert-Equal $upstreamHeaders.'x-api-key' 'fake-anthropic-key' 'configured API key reaches Anthropic'
         Assert-True (-not $upstreamHeaders.PSObject.Properties['authorization']) 'subscription OAuth does not override the API key'
