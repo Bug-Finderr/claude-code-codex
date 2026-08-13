@@ -2,9 +2,9 @@
   "private": true,
   "packageManager": "bun@1.3.14",
   "dependencies": {
-    "claudish": "7.40.0"
+    "claudish": "7.48.0"
   },
   "patchedDependencies": {
-    "claudish@7.40.0": "patches/claudish@7.40.0.patch"
+    "claudish@7.48.0": "patches/claudish@7.48.0.patch"
   }
 }
