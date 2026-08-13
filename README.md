@@ -22,6 +22,17 @@ The PowerShell profile command is:
 function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 ```
 
+## Patched Claudish behavior
+
+The pinned patch is limited to:
+
+- Preserve each request's model, while ordinary Sonnet Agent calls inherit the selected OpenAI model and explicit Fable, Opus, and workflow models stay unchanged.
+- Seed workflow token rows from the current request instead of the previous turn.
+- Forward mid-turn steering messages to OpenAI.
+- Prefer the configured native Anthropic API key in the local proxy, then remove both provider keys before spawning Claude Code.
+- Keep the configured Windows statusline instead of replacing it with Claudish's fallback.
+- Classify interactive versus headless mode from the actual stdout handle and suppress package checks with `--models-skip-update`.
+
 ## Usage
 
 Use the default model:
@@ -54,13 +65,11 @@ ccx --model=gpt-5.6-luna -p 'Summarize this repository'
 ccx --model gpt-5.6-sol -- --verbose
 ```
 
-The pinned Claudish patch classifies mode from its actual stdout handle. Attached positional prompts, flags, and resume flows stay interactive; redirected output and explicit `-p` or `--print` stay headless. `--models-skip-update` also suppresses Claudish's package update check.
-
-The selected OpenAI model remains the main model. The pinned Claudish translator removes Sonnet overrides from ordinary Agent calls before Claude Code receives them, while explicit Fable and Opus choices remain unchanged. Workflows also keep their explicit task models. OpenAI model IDs use the configured OpenAI endpoint; native Claude IDs prefer `ANTHROPIC_API_KEY` and otherwise use the existing Claude Code subscription login. The task UI and transcript therefore report the model that actually handled each task. OpenAI workflow token rows use Claudish's request-size estimate because exact input usage arrives only when the stream completes.
+OpenAI model IDs use the configured OpenAI endpoint. Native Claude IDs prefer `ANTHROPIC_API_KEY` and otherwise use the existing Claude Code subscription login. The task UI and transcript therefore report the model that actually handled each task.
 
 PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
 
-Every invocation explicitly disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag directly before the passthrough separator. It temporarily sets the selected OpenAI key and base URL plus Claudish isolation variables, retains `ANTHROPIC_API_KEY` for native Claude routes, removes `ANTHROPIC_AUTH_TOKEN`, and restores the parent environment afterward. The dependency patch removes both provider keys before Claude Code is spawned, after Claudish has read them for its local translator.
+Every invocation disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag before the passthrough separator. It temporarily sets the selected provider variables and restores the parent environment afterward.
 
 `ccx` invokes the pinned local Claudish entry point directly with Bun. It does not start or manage a separate local gateway daemon.
 
