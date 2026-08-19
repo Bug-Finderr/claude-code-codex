@@ -24,14 +24,14 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 
 ## Patched Claudish behavior
 
-The pinned patch is limited to:
+`ccx` patches upstream Claudish only to:
 
-- Preserve each request's model, while ordinary Sonnet Agent calls inherit the selected OpenAI model and explicit Fable, Opus, and workflow models stay unchanged.
-- Seed workflow token rows from the current request instead of the previous turn.
+- Keep each request's model. Ordinary Sonnet Agent calls inherit the selected OpenAI model; explicit Fable, Opus, and workflow models stay unchanged.
+- Start workflow token counts from the current request, not the previous turn.
 - Forward mid-turn steering messages to OpenAI.
-- Prefer the configured native Anthropic API key in the local proxy, then remove both provider keys before spawning Claude Code.
-- Keep the configured Windows statusline instead of replacing it with Claudish's fallback.
-- Classify interactive versus headless mode from the actual stdout handle and suppress package checks with `--models-skip-update`.
+- Use the configured Anthropic key inside the proxy, without exposing either provider key to Claude Code.
+- Keep the configured Windows statusline instead of Claudish's fallback.
+- Detect headless output correctly and make `--models-skip-update` skip both catalog and version checks.
 
 ## Usage
 

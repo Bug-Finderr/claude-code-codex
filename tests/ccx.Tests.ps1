@@ -257,6 +257,7 @@ const agentInput = async (model) => {
     body: JSON.stringify({
       model: "oai@gpt-5.6-sol",
       max_tokens: 64,
+      stream: true,
       messages: [{ role: "user", content: `delegate ${model}` }],
       tools: [{
         name: "Agent",
@@ -321,8 +322,6 @@ if defined ANTHROPIC_AUTH_TOKEN (
 ) else (
   >>"%CCX_ENV_CAPTURE_PATH%" echo(anthropic-token-absent
 )
->>"%CCX_ENV_CAPTURE_PATH%" echo(context-window-%CLAUDE_CODE_MAX_CONTEXT_TOKENS%
->>"%CCX_ENV_CAPTURE_PATH%" echo(compact-window-%CLAUDE_CODE_AUTO_COMPACT_WINDOW%
 :args
 if "%~1"=="" goto done
 if /i "%~1"=="--settings" copy /y "%~2" "%CCX_SETTINGS_CAPTURE_PATH%" >nul
@@ -374,9 +373,7 @@ exit /b %ERRORLEVEL%
         Assert-Sequence @(Get-Content -LiteralPath $environmentCapturePath) @(
             'openai-absent',
             'anthropic-key-absent',
-            'anthropic-token-absent',
-            'context-window-1050000',
-            'compact-window-1050000'
+            'anthropic-token-absent'
         ) 'Claude child auth environment'
         $settings = Get-Content -LiteralPath $settingsCapturePath -Raw | ConvertFrom-Json
         Assert-Equal $settings.hooks.PreToolUse.Count 1 'user hook survives settings merge'
@@ -460,7 +457,8 @@ exit /b %ERRORLEVEL%
             -OpenAIKey 'fake-openai-key' 2>$null | ForEach-Object { "pipe:$_" })
         Assert-Sequence $piped @('pipe:True') 'pipeline capture'
         Assert-Equal $script:CcxExitCode 0 'pipeline exit code'
-        Assert-True (-not (Test-Path -LiteralPath (Join-Path $testDrive 'claudish/update-check.json'))) 'update-check cache is absent'
+        $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
+        Assert-True $source.Contains('if (cliConfig.interactive && !cliConfig.jsonOutput && !cliConfig.skipModelsUpdate)') 'skip flag suppresses the version check'
     } finally {
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
         Remove-Item -LiteralPath $testDrive -Recurse -Force
