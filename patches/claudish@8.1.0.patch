@@ -1,8 +1,8 @@
 diff --git a/dist/index.js b/dist/index.js
-index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423bedf122e6 100644
+index fb2d5c846ce022ff8535a2009b711b07f6b8848e..0a26ca6920fa6bd50aec77ab10097e7fb92cfb6b 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -28159,6 +28159,8 @@ ${msg}`;
+@@ -28419,6 +28419,8 @@ ${msg}`;
          processUserMessage(msg, messages, simpleFormat);
        else if (msg.role === "assistant")
          processAssistantMessage(msg, messages, simpleFormat);
@@ -11,7 +11,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
      }
    }
    return messages;
-@@ -38556,7 +38558,7 @@ data: ${JSON.stringify(data)}
+@@ -42846,7 +42848,7 @@ data: ${JSON.stringify(data)}
            model: opts.modelName,
            stop_reason: null,
            stop_sequence: null,
@@ -20,7 +20,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
          }
        });
        send("ping", { type: "ping" });
-@@ -39839,10 +39841,22 @@ class ComposedHandler {
+@@ -44193,10 +44195,22 @@ class ComposedHandler {
            toolNameMap: adapter.getToolNameMap(),
            contextWindow: lookupModelForProvider(this.bareModelName, this.provider.name),
            onApiError,
@@ -46,7 +46,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
            onAssistantText: (text, kind) => behaviorSession?.observeText(text, kind),
            onToolCallObserved: observeToolCall,
            onTurnEnd: () => behaviorSession?.finishTurn()
-@@ -51147,18 +51161,15 @@ class NativeHandler {
+@@ -54727,18 +54741,16 @@ class NativeHandler {
        "Content-Type": "application/json",
        "anthropic-version": originalHeaders["anthropic-version"] || "2023-06-01"
      };
@@ -59,20 +59,20 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
 -    if (originalHeaders["x-api-key"]) {
 +    } else if (originalHeaders["x-api-key"]) {
        headers["x-api-key"] = originalHeaders["x-api-key"];
--    }
+     }
 -    if (!originalHeaders.authorization && !originalHeaders["x-api-key"]) {
 -      let fallbackKey = this.apiKey;
 -      if (!fallbackKey) {
 -        const auth = await credentials.getRequestAuth("native-anthropic", { model: target });
 -        fallbackKey = auth.headers["x-api-key"];
 -      }
-+    } else {
++    if (!this.apiKey && !originalHeaders.authorization && !originalHeaders["x-api-key"]) {
 +      const auth = await credentials.getRequestAuth("native-anthropic", { model: target });
 +      const fallbackKey = auth.headers["x-api-key"];
        if (fallbackKey) {
          headers["x-api-key"] = fallbackKey;
        }
-@@ -52297,9 +52308,9 @@ async function createProxyServer(port, _openrouterApiKey, model, monitorMode = f
+@@ -55887,9 +55899,9 @@ async function createProxyServer(port, _openrouterApiKey, model, monitorMode = f
        } else if (req.includes("haiku") && modelMap.haiku) {
          target = modelMap.haiku;
          wasFromModelMap = true;
@@ -84,15 +84,15 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
        target = model;
      }
      const invocationMode = detectInvocationMode(target, wasFromModelMap);
-@@ -72409,6 +72420,7 @@ async function parseArgs(args) {
-     stdin: false,
+@@ -75563,6 +75575,7 @@ async function parseArgs(args) {
      freeOnly: false,
      noLogs: false,
-+    preserveRequestModels: false,
      diagMode: "auto",
++    preserveRequestModels: false,
      claudeArgs: []
    };
-@@ -72550,6 +72562,8 @@ async function parseArgs(args) {
+   const claudishModel = process.env[ENV.CLAUDISH_MODEL];
+@@ -75703,6 +75716,8 @@ async function parseArgs(args) {
        config3.forceUpdate = true;
      } else if (arg === "--models-skip-update") {
        config3.skipModelsUpdate = true;
@@ -101,7 +101,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
      } else if (arg === "--profile") {
        const profileArg = args[++i];
        if (!profileArg) {
-@@ -72723,7 +72737,7 @@ Usage:  claudish --models --provider <slug>`);
+@@ -75903,7 +75918,7 @@ Usage:  claudish --models --provider <slug>`);
      } else if (arg === "--") {
        const rest = args.slice(i + 1);
        config3.claudeArgs.push(...rest);
@@ -110,7 +110,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
          config3._hasPositionalPrompt = true;
        break;
      } else if (arg === "--resume" && (i + 1 >= args.length || args[i + 1].startsWith("-"))) {
-@@ -72743,7 +72757,7 @@ Usage:  claudish --models --provider <slug>`);
+@@ -75923,7 +75938,7 @@ Usage:  claudish --models --provider <slug>`);
      i++;
    }
    if (!config3._hasPositionalPrompt && !config3.stdin && !config3._hasPrintFlag) {
@@ -119,15 +119,13 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
    }
    if (config3._sawVerbose && !config3.interactive && !config3.claudeArgs.includes("--verbose") && !config3.claudeArgs.includes("-v")) {
      config3.claudeArgs.push("--verbose");
-@@ -73723,6 +73737,7 @@ ${h("MODEL DISCOVERY")}
-                                           ${dim3("a real 1-token request (may incur tiny cost)")}
-   ${green2("--no-probe")}                            Skip live requests, show static chain only
+@@ -76917,4 +76932,5 @@ ${h("MODEL DISCOVERY")}
    ${green2("--probe-timeout")} ${yellow2("<secs>")}                 Per-link timeout for live probes (default: 40)
-+  ${green2("--preserve-request-models")}             Route each request to its resolved model (hybrid)
    ${green2("--models-refresh")}                      Force refresh the slim model catalog from Firebase
    ${green2("--models-skip-update")}                  Skip the launcher catalog warm step (offline)
++  ${green2("--preserve-request-models")}             Route each request to its resolved model (hybrid)
    ${green2("--json")}                                JSON output (with --models / --models-top / --probe)
-@@ -81550,7 +81565,7 @@ function shouldPreserveNativeAuth(config3) {
+@@ -84993,7 +85009,7 @@ function shouldPreserveNativeAuth(config3) {
    return hasNativeAnthropicMapping(config3) || classifierPassthroughEnabled(config3) && hasResolvableAnthropicAuth();
  }
  function isProxyAuthMode(config3) {
@@ -136,7 +134,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
  }
  function managedSettingsPath() {
    if (isWindows2()) {
-@@ -81853,11 +81868,14 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode, userStatusLi
+@@ -85296,11 +85312,14 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode, userStatusLi
      const segmentNoDir = `if [ -n "$PROVIDER" ]; then ${segmentNoDirWithProvider}; else ${segmentNoDirNoProvider}; fi`;
      statusCommand = userStatusLineCommand ? buildChainedStatusCommand(userStatusLineCommand, readState, segmentNoDir) : `JSON=$(cat); ${dirPrelude}${readState}; ${segmentWithDir}`;
    }
@@ -152,7 +150,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
    const settings = buildClaudishSettingsOverlay(statusLine, proxyAuthMode);
    writeFileSync21(tempPath, JSON.stringify(settings, null, 2), "utf-8");
    return { path: tempPath, statusLine, tokenFilePath };
-@@ -81877,7 +81895,9 @@ function mergeUserSettingsIfPresent(config3, tempSettingsPath, statusLine, proxy
+@@ -85320,7 +85339,9 @@ function mergeUserSettingsIfPresent(config3, tempSettingsPath, statusLine, proxy
    const userSettingsValue = config3.claudeArgs[idx + 1];
    try {
      const userSettings = parseSettingsArg(userSettingsValue);
@@ -163,7 +161,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
      if (!("disableClaudeAiConnectors" in userSettings)) {
        userSettings.disableClaudeAiConnectors = true;
      }
-@@ -82001,6 +82021,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -85444,6 +85465,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
      CLAUDISH_IS_LOCAL: isLocalModel2 ? "true" : "false",
      [ENV.CLAUDISH_TOKEN_FILE]: tokenFilePath
    };
@@ -171,7 +169,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
    if (modelId) {
      const parsedSpec = parseModelSpec(modelId);
      const providerDisplayName = parsedSpec.isExplicitProvider ? getProviderByName(parsedSpec.provider)?.displayName : undefined;
-@@ -82031,8 +82052,10 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -85474,8 +85496,10 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
        if (classifierPassthroughEnabled(config3)) {
          console.error("[claudish] classifier passthrough enabled but no Anthropic credentials detected \u2014 " + "classifier requests will fail to authenticate against api.anthropic.com. " + "Map a role to a native Claude model (e.g. --model-sonnet claude-sonnet-5) or set ANTHROPIC_API_KEY.");
        }
@@ -184,7 +182,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
        const realWindow = await computeMainThreadContextWindow(config3);
        const contextEnv = resolveContextWindowEnv(realWindow, process.env);
        Object.assign(env, contextEnv.vars);
-@@ -82048,6 +82071,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
+@@ -85491,6 +85515,7 @@ async function runClaudeWithProxy(config3, proxyUrl, onCleanup) {
        }
      }
    }
@@ -192,7 +190,7 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
    const log2 = (message) => {
      if (!config3.quiet) {
        if (config3.interactive) {
-@@ -85762,7 +85786,7 @@ Team Status`);
+@@ -88772,7 +88797,7 @@ Team Status`);
          console.log(`[claudish] Debug log: ${logFile}`);
        }
      }
@@ -201,12 +199,12 @@ index 9d642029a44847ff4718d3773c5ca2043d7d08fe..ba381d855fafd50ac35d51429efb423b
        await traceSpan("startup:update-check", () => checkForUpdates2(getVersion4(), { quiet: cliConfig.quiet }));
      }
      if (!await traceSpan("startup:claude-detect", () => checkClaudeInstalled2())) {
-@@ -85885,7 +85909,8 @@ Team Status`);
-       advisorModels: cliConfig.advisorModels,
-       advisorCollector: cliConfig.advisorCollector,
-       modelChain: cliConfig.monitor ? undefined : cliConfig.modelChain,
--      classifier: resolveClassifierConfig(cliConfig, process.env)
-+      classifier: resolveClassifierConfig(cliConfig, process.env),
+@@ -88898,7 +88923,8 @@ Team Status`);
+       classifier: resolveClassifierConfig(cliConfig, process.env),
+       effortOverride: cliConfig.effortOverride,
+       modelParams: cliConfig.modelParams,
+-      proOnUltracode: cliConfig.proOnUltracode
++      proOnUltracode: cliConfig.proOnUltracode,
 +      preserveRequestModels: cliConfig.preserveRequestModels
      }));
      const diag = createDiagOutput2({
