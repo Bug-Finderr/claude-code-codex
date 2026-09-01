@@ -4,25 +4,25 @@
   "workspaces": {
     "": {
       "dependencies": {
-        "claudish": "7.63.0",
+        "claudish": "8.1.0",
       },
     },
   },
   "patchedDependencies": {
-    "claudish@7.63.0": "patches/claudish@7.63.0.patch",
+    "claudish@8.1.0": "patches/claudish@8.1.0.patch",
   },
   "packages": {
     "@1password/sdk": ["@1password/sdk@0.4.1-beta.1", "", { "dependencies": { "@1password/sdk-core": "0.4.1-beta.1" } }, "sha512-QWY6eIIEs9at6kAFbgjZ1vVxg7ygp/MwXJ6/BoBdPkqIk8vfulXu4pjDsVQ87HhddJAD5LVGBXSbQIa+svI3bA=="],
 
     "@1password/sdk-core": ["@1password/sdk-core@0.4.1-beta.1", "", {}, "sha512-/otbg1JVhsEn6oUIeReoT9TmFr8J7KBwr9UuRVfJFwwGG3bHPF8ewT+LhRimQeJtypqQ69ZVuOYkxknD4iQHxw=="],
 
-    "@claudish/magmux-darwin-arm64": ["@claudish/magmux-darwin-arm64@7.63.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-QLM2+9/G9Qw0ATJULHV0HUNJeNCuSC7JvjtRqvr8R3Wp8nj3K/NaxkH9s3fqabZ1DQjO+lu8yN6TtGgq8cajcw=="],
+    "@claudish/magmux-darwin-arm64": ["@claudish/magmux-darwin-arm64@8.1.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-MctbpFKuxQftp0dyCE5LVZD6/x7w3wLqAdmNnpcZCMse9sDV0gxY+1fHNjU/TXCkhRqWvvr+A4wBA7Fj5xT9vg=="],
 
-    "@claudish/magmux-darwin-x64": ["@claudish/magmux-darwin-x64@7.63.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-6C3uhDmLQVbqx1LNgx99FXkKl+qZawOHgUJ8OS0v9eNxzVT2jBB+MobmCU7yiGRLFNG3PX1YBIqoOXPZqe5ElQ=="],
+    "@claudish/magmux-darwin-x64": ["@claudish/magmux-darwin-x64@8.1.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-2FKEHl6HWvqZoP81de6BimbcpeK/sdKVEY5m41NytV5zAZlIfbq28EwMHZtq3wOvyUkD1D3DtixMJ0vttKAetw=="],
 
-    "@claudish/magmux-linux-arm64": ["@claudish/magmux-linux-arm64@7.63.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-Mi2Vydqp0r/DbV2fHjn6A4iF/cioIi7OwrecccTQuc/Wa6T8z/WhBfCFdQyx8l1tvHylcZq/ghfvaW2q3Gh4UQ=="],
+    "@claudish/magmux-linux-arm64": ["@claudish/magmux-linux-arm64@8.1.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-t7a0ke14wf9gDYolPRznXFl1OSHPwpYQcoLkGTSQ4//NIt2tSr535uXtGlaLqb5PzEaXQLOkOaXdly4XWoDnPg=="],
 
-    "@claudish/magmux-linux-x64": ["@claudish/magmux-linux-x64@7.63.0", "", { "os": "linux", "cpu": "x64" }, "sha512-aDPRvqHT+0AS9rTQrQawiVcMTY38Jz5NF5kkRv6zkMMam7PC/tsfDi5Tp7UHX/Y86TFwv3/NWwYII6FF/N/Shg=="],
+    "@claudish/magmux-linux-x64": ["@claudish/magmux-linux-x64@8.1.0", "", { "os": "linux", "cpu": "x64" }, "sha512-snPh2+zxLyAa3i2TExcdPstSqLMYZcgTT1OkaNvPZ00vt+hOK5ox42GUGOg7yi4h9p/lVfTdIhiuYnwQrSfH3A=="],
 
     "@dimforge/rapier2d-simd-compat": ["@dimforge/rapier2d-simd-compat@0.17.3", "", {}, "sha512-bijvwWz6NHsNj5e5i1vtd3dU2pDhthSaTUZSh14DUGGKJfw8eMnlWZsxwHBxB/a3AXVNDjL9abuHw1k9FGR+jg=="],
 
@@ -182,7 +182,7 @@
 
     "chardet": ["chardet@2.2.0", "", {}, "sha512-rddelWYNPRrXq6PtNEN2S3f6t9ILzvqaN5pVgi4kqt9jHQaXIial9PznB5iSPVlQSLNaaH22ItWz3EJtQ10+OA=="],
 
-    "claudish": ["claudish@7.63.0", "", { "dependencies": { "@1password/sdk": "0.4.1-beta.1", "@inquirer/prompts": "^8.0.1", "@inquirer/search": "^4.0.1", "@modelcontextprotocol/sdk": "^1.27.0", "@opentui/core": "^0.1.107", "@opentui/react": "^0.1.107", "dotenv": "^17.2.3", "react": "^19.2.4", "zod": "^4.1.13" }, "optionalDependencies": { "@claudish/magmux-darwin-arm64": "7.63.0", "@claudish/magmux-darwin-x64": "7.63.0", "@claudish/magmux-linux-arm64": "7.63.0", "@claudish/magmux-linux-x64": "7.63.0" }, "bin": { "claudish": "bin/claudish.cjs" } }, "sha512-HkL3Dji5JD3mJgLLlFvbqMDKikOrciQyn0+nnAycd1amO8rzNmQRVBtipf69NCFyl0W/hzE1q7gx2sPScM3Hbw=="],
+    "claudish": ["claudish@8.1.0", "", { "dependencies": { "@1password/sdk": "0.4.1-beta.1", "@inquirer/prompts": "^8.0.1", "@inquirer/search": "^4.0.1", "@modelcontextprotocol/sdk": "^1.27.0", "@opentui/core": "^0.1.107", "@opentui/react": "^0.1.107", "dotenv": "^17.2.3", "react": "^19.2.4", "zod": "^4.1.13" }, "optionalDependencies": { "@claudish/magmux-darwin-arm64": "8.1.0", "@claudish/magmux-darwin-x64": "8.1.0", "@claudish/magmux-linux-arm64": "8.1.0", "@claudish/magmux-linux-x64": "8.1.0" }, "bin": { "claudish": "bin/claudish.cjs" } }, "sha512-VmydcK/CIL01cavBCovvqO2LHcl0ul1wGzhSBSTl+MzoXaO4qxXSrRb8awECQ1tEBgq50Csv7EWHbmLpU1WpsA=="],
 
     "cli-width": ["cli-width@4.1.0", "", {}, "sha512-ouuZd4/dm2Sw5Gmqy6bGyNNNe1qt9RpmxveLSO7KcgsTnU7RXfsw+/bukWGo1abgBiMAic068rclZsO4IWmmxQ=="],
 
