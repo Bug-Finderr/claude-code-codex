@@ -1,6 +1,6 @@
 # Claude Code with OpenAI models
 
-`ccx` runs Claude Code through the project-local Claudish package. It uses OpenAI `gpt-5.6-sol` by default.
+`ccx` runs Claude Code through the project-local Claudish package. It uses OpenAI `gpt-6-astra` by default.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 
 `ccx` patches upstream Claudish only to:
 
-- Keep each request's model. Ordinary Sonnet Agent calls inherit the selected OpenAI model; explicit Fable, Opus, and workflow models stay unchanged.
+- Route Astra through OpenAI Responses and keep each request's model. Ordinary Sonnet Agent calls inherit the selected OpenAI model; explicit Fable, Opus, and workflow models stay unchanged.
 - Start workflow token counts from the current request, not the previous turn.
 - Forward mid-turn steering messages to OpenAI.
 - Use the configured Anthropic key inside the proxy, without exposing either provider key to Claude Code.
@@ -52,17 +52,17 @@ ccx
 
 `OPENAI_BASE_URL` accepts the usual OpenAI SDK form ending in `/v1`; `ccx` removes that suffix because Claudish appends the versioned endpoint itself. Without the variables, the key falls back to `~/.codex/auth.json` and the base URL to `https://api.openai.com`.
 
-Select another OpenAI model with either wrapper form:
+Set the OpenAI model explicitly with either wrapper form:
 
 ```powershell
-ccx --model gpt-5.6-terra
-ccx --model=gpt-5.6-luna -p 'Summarize this repository'
+ccx --model gpt-6-astra
+ccx --model=gpt-6-astra -p 'Summarize this repository'
 ```
 
 `ccx` consumes `--model` only before the first `--`. The separator itself is removed, and every later argument is passed literally to Claude Code:
 
 ```powershell
-ccx --model gpt-5.6-sol -- --verbose
+ccx --model gpt-6-astra -- --verbose
 ```
 
 OpenAI model IDs use the configured OpenAI endpoint. Native Claude IDs prefer `ANTHROPIC_API_KEY` and otherwise use the existing Claude Code subscription login. The task UI and transcript therefore report the model that actually handled each task.

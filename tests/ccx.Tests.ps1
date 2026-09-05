@@ -99,7 +99,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
 
 Test-Case 'default model and ordinary arguments are preserved' {
     $result = Split-CcxArguments -Arguments @('-p', 'hello world', '--output-format', 'text')
-    Assert-Equal $result.Model 'gpt-5.6-sol' 'default model'
+    Assert-Equal $result.Model 'gpt-6-astra' 'default model'
     Assert-Sequence @($result.ClaudeArgs) @('-p', 'hello world', '--output-format', 'text') 'Claude arguments'
 }
 
@@ -255,7 +255,7 @@ const agentInput = async (model) => {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      model: "oai@gpt-5.6-sol",
+      model: "oai@gpt-6-astra",
       max_tokens: 64,
       stream: true,
       messages: [{ role: "user", content: `delegate ${model}` }],
@@ -338,7 +338,7 @@ exit /b %ERRORLEVEL%
         $env:LOCALAPPDATA = $testDrive
         $claudishHome = Join-Path $testDrive '.claudish'
         New-Item -ItemType Directory -Path $claudishHome | Out-Null
-        Set-Content -LiteralPath (Join-Path $claudishHome 'all-models.json') -Value '{"version":2,"lastUpdated":"2026-08-06T00:00:00.000Z","entries":[{"modelId":"gpt-5.6-sol","aliases":["gpt-5.6-sol"],"contextWindow":1050000,"aggregators":[{"provider":"openai","contextWindow":1050000}]}],"models":[]}'
+        Set-Content -LiteralPath (Join-Path $claudishHome 'all-models.json') -Value '{"version":2,"lastUpdated":"2026-08-06T00:00:00.000Z","entries":[{"modelId":"gpt-6-astra","aliases":["gpt-6-astra"],"contextWindow":1050000,"aggregators":[{"provider":"openai","contextWindow":1050000}]}],"models":[]}'
         $oldCapturePath = $env:CCX_ENV_CAPTURE_PATH
         $oldSettingsCapturePath = $env:CCX_SETTINGS_CAPTURE_PATH
         $env:CCX_ENV_CAPTURE_PATH = $environmentCapturePath
@@ -354,7 +354,7 @@ exit /b %ERRORLEVEL%
         try {
             $claudishArgs = @('--preload', $preloadScript) + @(Get-ClaudishArguments `
                 -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
-                -Model 'gpt-5.6-sol' `
+                -Model 'gpt-6-astra' `
                 -ClaudeArgs @('-p', 'smoke', '--settings', $userSettingsPath))
             $output = @(Invoke-CcxCommand `
                 -BunPath (Get-Command bun -CommandType Application).Source `

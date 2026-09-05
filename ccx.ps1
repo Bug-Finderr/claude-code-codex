@@ -23,7 +23,7 @@ function Get-ClaudishOpenAIBaseUrl {
 function Split-CcxArguments {
     param([string[]]$Arguments = @())
 
-    $model = 'gpt-5.6-sol'
+    $model = 'gpt-6-astra'
     $claudeArgs = [System.Collections.Generic.List[string]]::new()
     $parseWrapperFlags = $true
 
