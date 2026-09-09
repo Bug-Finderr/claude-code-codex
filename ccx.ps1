@@ -8,7 +8,7 @@ function Get-OpenAIKey {
 
     if (-not [string]::IsNullOrWhiteSpace($EnvironmentKey)) { return $EnvironmentKey }
     if (-not (Test-Path -LiteralPath $AuthPath)) { return }
-    $auth = Get-Content -Raw -LiteralPath $AuthPath | ConvertFrom-Json
+    try { $auth = Get-Content -Raw -LiteralPath $AuthPath | ConvertFrom-Json } catch { return }
     $auth.OPENAI_API_KEY
 }
 
@@ -123,11 +123,14 @@ function Invoke-Ccx {
         throw "Claudish is not installed. Run 'bun install' in $PSScriptRoot."
     }
 
-    $openAIKey = Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json')
+    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+    $authPath = Join-Path $codexHome 'auth.json'
+    $auth = try { if (Test-Path -LiteralPath $authPath) { Get-Content -LiteralPath $authPath -Raw | ConvertFrom-Json } } catch { $null }
+    $openAIKey = Get-OpenAIKey -AuthPath $authPath
     $claudishArgs = @(Get-ClaudishArguments `
         -ClaudishPath $claudishPath `
         -Model $parsed.Model `
-        -UseSubscription:((Test-Path -LiteralPath (Join-Path $HOME '.claudish/codex-oauth.json')) -or [string]::IsNullOrWhiteSpace($openAIKey)) `
+        -UseSubscription:(($auth.auth_mode -eq 'chatgpt' -and [bool]$auth.tokens.access_token) -or (Test-Path -LiteralPath (Join-Path $HOME '.claudish/codex-oauth.json')) -or [string]::IsNullOrWhiteSpace($openAIKey)) `
         -ClaudeArgs $parsed.ClaudeArgs)
     Invoke-CcxCommand `
         -BunPath $bun.Source `

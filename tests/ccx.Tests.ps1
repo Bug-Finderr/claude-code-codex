@@ -138,6 +138,9 @@ Test-Case 'environment key takes precedence and auth file remains the fallback' 
         Set-Content -LiteralPath $fakeAuth -Value '{"auth_mode":"chatgpt"}'
         Assert-True ([string]::IsNullOrWhiteSpace((Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey ''))) 'ChatGPT auth needs no API key'
         Assert-True ([string]::IsNullOrWhiteSpace((Get-OpenAIKey -AuthPath "$testDrive/missing.json" -EnvironmentKey ''))) 'Claudish login needs no Codex auth file'
+        Set-Content -LiteralPath $fakeAuth -Value '{bad json'
+        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey 'env-openai-key') 'env-openai-key' 'broken auth file does not block an environment key'
+        Assert-True ([string]::IsNullOrWhiteSpace((Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey ''))) 'broken auth file leaves Claudish login available'
     } finally {
         Remove-Item -LiteralPath $testDrive -Recurse -Force
     }
@@ -237,13 +240,13 @@ Test-Case 'missing native command restores environment and retains failure exit'
     }
 }
 
-foreach ($authMode in 'api', 'subscription', 'missing', 'expired', 'unconfigured', 'expired-no-key') {
+foreach ($authMode in 'api', 'subscription', 'codex', 'codex-expired', 'missing', 'expired', 'unconfigured', 'expired-no-key') {
 Test-Case "patched real Claudish routing and Claude child environment ($authMode)" {
     $useSubscription = $authMode -ne 'api'
     $expectAuthFailure = $authMode -in 'unconfigured', 'expired-no-key'
     $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-claudish-test-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $testDrive | Out-Null
-    $names = @('CLAUDE_PATH', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'CCX_TEST_AUTH_MODE', 'OPENAI_CODEX_API_KEY')
+    $names = @('CLAUDE_PATH', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'CODEX_HOME', 'CCX_TEST_AUTH_MODE', 'OPENAI_CODEX_API_KEY')
     $saved = @{}
     try {
         $fakeClaude = Join-Path $testDrive 'claude.cmd'
@@ -310,9 +313,10 @@ globalThis.fetch = async (input, init) => {
   if (url === "https://api.openai.com/v1/responses" || url === "https://proxy.invalid/v1/responses" || url === "https://chatgpt.com/backend-api/codex/responses") {
     await Bun.write(process.env.CCX_AGENT_CAPTURE_PATH + ".request", url);
     const subscription = url.startsWith("https://chatgpt.com/");
-    if (subscription !== (process.env.CCX_TEST_AUTH_MODE === "subscription")) throw new Error("Wrong billing route");
+    if (subscription !== ["subscription", "codex"].includes(process.env.CCX_TEST_AUTH_MODE)) throw new Error("Wrong billing route");
     const headers = new Headers(init.headers);
-    if (subscription && (headers.get("authorization") !== "Bearer fake-subscription-token" || headers.get("chatgpt-account-id") !== "fake-account")) throw new Error("Missing subscription credentials");
+    const token = process.env.CCX_TEST_AUTH_MODE === "codex" ? `e30.${Buffer.from('{"exp":4102444800}').toString("base64url")}.fake` : "fake-subscription-token";
+    if (subscription && (headers.get("authorization") !== `Bearer ${token}` || headers.get("chatgpt-account-id") !== "fake-account")) throw new Error("Missing subscription credentials");
     if (!subscription && headers.get("authorization") !== "Bearer fake-openai-key") throw new Error("Missing fallback API key");
     if (["missing", "expired"].includes(process.env.CCX_TEST_AUTH_MODE) && url !== "https://proxy.invalid/v1/responses") throw new Error("Fallback ignored custom base URL");
     const request = JSON.parse(init.body);
@@ -365,11 +369,17 @@ exit /b %ERRORLEVEL%
         $env:HOME = $testDrive
         $env:USERPROFILE = $testDrive
         $env:LOCALAPPDATA = $testDrive
+        $env:CODEX_HOME = Join-Path $testDrive '.codex'
         $env:CCX_TEST_AUTH_MODE = $authMode
         $env:OPENAI_CODEX_API_KEY = $null
         $claudishHome = Join-Path $testDrive '.claudish'
         New-Item -ItemType Directory -Path $claudishHome | Out-Null
-        if ($authMode -notin 'missing', 'unconfigured') {
+        if ($authMode -like 'codex*') {
+            New-Item -ItemType Directory -Path $env:CODEX_HOME | Out-Null
+            $expiry = if ($authMode -eq 'codex-expired') { 1 } else { 4102444800 }
+            $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("{`"exp`":$expiry}")).TrimEnd('=').Replace('+','-').Replace('/','_')
+            Set-Content -LiteralPath (Join-Path $env:CODEX_HOME 'auth.json') -Value "{`"auth_mode`":`"chatgpt`",`"tokens`":{`"access_token`":`"e30.$payload.fake`",`"account_id`":`"fake-account`",`"refresh_token`":`"do-not-copy`"}}"
+        } elseif ($authMode -notin 'missing', 'unconfigured') {
             $expiry = if ($authMode -like 'expired*') { 1 } else { 4102444800000 }
             Set-Content -LiteralPath (Join-Path $claudishHome 'codex-oauth.json') -Value "{`"access_token`":`"fake-subscription-token`",`"refresh_token`":`"fake-refresh`",`"expires_at`":$expiry,`"account_id`":`"fake-account`"}"
         }
