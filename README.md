@@ -15,13 +15,15 @@ Install the pinned dependencies once:
 bun install --frozen-lockfile
 ```
 
-For ChatGPT subscription access, sign in once through Claudish:
+An existing file-based Codex ChatGPT login works automatically (`CODEX_HOME/auth.json`, or `~/.codex/auth.json`). ccx rereads it for each request without copying or changing tokens. Codex owns refresh; open Codex if that login expires. API-key fallback still applies.
+
+Alternatively, sign in through Claudish:
 
 ```powershell
 bun node_modules/claudish/dist/index.js login codex
 ```
 
-This is separate from `codex login`. Claudish stores and refreshes its own login in `~/.claudish/codex-oauth.json`; ccx does not copy Codex login tokens. Subscription calls use your ChatGPT plan's limits, not API credits.
+Claudish stores and refreshes that separate login in `~/.claudish/codex-oauth.json` and prefers it when present. Subscription calls use your ChatGPT plan's limits, not API credits.
 
 The PowerShell profile command is:
 
@@ -35,6 +37,7 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 
 - Keep each request's model. Ordinary Sonnet Agent calls inherit the selected OpenAI model; explicit Fable, Opus, and workflow models stay unchanged.
 - Fall back to a configured API key if ChatGPT credentials cannot load or refresh. API fallback uses API billing.
+- Reuse an existing file-based Codex ChatGPT login without a second sign-in or token copies.
 - Route Astra through OpenAI Responses even without a current model catalog.
 - Start workflow token counts with an estimate of the current request, not the previous turn.
 - Forward mid-turn steering messages to OpenAI.
@@ -53,7 +56,7 @@ ccx
 ccx -p 'Reply with exactly: CCX_OK' --output-format text
 ```
 
-With a Claudish ChatGPT login, ccx tries the subscription first (`cx@`). If credentials are missing or cannot refresh, it falls back to a configured API key. Without a subscription login, an `OPENAI_API_KEY` in the environment or a legacy key in `~/.codex/auth.json` uses the API directly (`oai@`). For example, to configure an API proxy:
+With a Codex or Claudish ChatGPT login, ccx tries the subscription first (`cx@`). If credentials are missing, expired, or cannot refresh, it falls back to a configured API key. Without a subscription login, an `OPENAI_API_KEY` in the environment or a legacy key in Codex's auth file uses the API directly (`oai@`). For example, to configure an API proxy:
 
 ```powershell
 $env:OPENAI_API_KEY = '<proxy-token>'
