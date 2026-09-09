@@ -88,6 +88,7 @@ function Invoke-CcxCommand {
     $environment = [ordered]@{
         OPENAI_API_KEY = $OpenAIKey
         OPENAI_BASE_URL = $OpenAIBaseUrl
+        OPENAI_CODEX_BASE_URL = $OpenAIBaseUrl
         CLAUDISH_STATS = 'off'
         CLAUDISH_TELEMETRY = '0'
         ANTHROPIC_AUTH_TOKEN = $null
@@ -123,13 +124,10 @@ function Invoke-Ccx {
     }
 
     $openAIKey = Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json')
-    if ([string]::IsNullOrWhiteSpace($openAIKey) -and -not (Test-Path -LiteralPath (Join-Path $HOME '.claudish/codex-oauth.json'))) {
-        throw "Sign in to ChatGPT first: bun `"$claudishPath`" login codex"
-    }
     $claudishArgs = @(Get-ClaudishArguments `
         -ClaudishPath $claudishPath `
         -Model $parsed.Model `
-        -UseSubscription:([string]::IsNullOrWhiteSpace($openAIKey)) `
+        -UseSubscription:((Test-Path -LiteralPath (Join-Path $HOME '.claudish/codex-oauth.json')) -or [string]::IsNullOrWhiteSpace($openAIKey)) `
         -ClaudeArgs $parsed.ClaudeArgs)
     Invoke-CcxCommand `
         -BunPath $bun.Source `
