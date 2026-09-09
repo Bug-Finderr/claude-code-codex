@@ -266,11 +266,14 @@ const agentInput = async (model) => {
       }],
     }),
   });
-  const deltas = (await response.text()).split("\n")
+  const body = await response.text();
+  if (!response.ok) throw new Error(`Agent request failed (${response.status}): ${body}`);
+  const deltas = body.split("\n")
     .filter((line) => line.startsWith("data: "))
     .map((line) => JSON.parse(line.slice(6)))
     .filter((event) => event.type === "content_block_delta" && event.delta.type === "input_json_delta")
     .map((event) => event.delta.partial_json);
+  if (!deltas.length) throw new Error(`No Agent arguments: ${body}`);
   return JSON.parse(deltas.join(""));
 };
 await Bun.write(process.env.CCX_AGENT_CAPTURE_PATH, JSON.stringify([
@@ -400,7 +403,7 @@ Test-Case 'OpenAI Responses starts workflow usage from the current request' {
 
     $ollama = $source.Substring($ollamaStart, $responsesStart - $ollamaStart)
     $responses = $source.Substring($responsesStart, $responsesEnd - $responsesStart)
-    Assert-True ($source.Contains('initialInputTokens: estimateTokens(JSON.stringify(claudeRequest))')) 'request token estimate is passed to the stream'
+    Assert-True ($source.Contains('initialInputTokens: Math.ceil(JSON.stringify(claudeRequest).length / 4)')) 'request token estimate is passed to the stream'
     Assert-True ($responses.Contains('usage: messageStartUsage(opts.initialInputTokens)')) 'Responses message_start uses the request estimate'
     Assert-True ($ollama.Contains('usage: messageStartUsage(opts.priorInputTokens)')) 'Ollama keeps upstream usage accounting'
 }
