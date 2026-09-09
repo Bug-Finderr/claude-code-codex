@@ -7,14 +7,21 @@
 - PowerShell 7
 - Bun 1.3.14
 - Claude Code installed on `PATH`
-- `OPENAI_API_KEY` in the environment or `~/.codex/auth.json`
-- API access to the selected OpenAI model
+- A ChatGPT subscription with access to the selected model, or an OpenAI API key
 
 Install the pinned dependencies once:
 
 ```powershell
 bun install --frozen-lockfile
 ```
+
+For ChatGPT subscription access, sign in once through Claudish:
+
+```powershell
+bun node_modules/claudish/dist/index.js login codex
+```
+
+This is separate from `codex login`. Claudish stores and refreshes its own login in `~/.claudish/codex-oauth.json`; ccx does not copy Codex login tokens. Subscription calls use your ChatGPT plan's limits, not API credits.
 
 The PowerShell profile command is:
 
@@ -27,6 +34,7 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 `ccx` uses Claudish 9.1.0 with these local changes:
 
 - Keep each request's model. Ordinary Sonnet Agent calls inherit the selected OpenAI model; explicit Fable, Opus, and workflow models stay unchanged.
+- Keep the ChatGPT route subscription-only: login failures never fall back to paid API keys.
 - Route Astra through OpenAI Responses even without a current model catalog.
 - Start workflow token counts with an estimate of the current request, not the previous turn.
 - Forward mid-turn steering messages to OpenAI.
@@ -45,7 +53,7 @@ ccx
 ccx -p 'Reply with exactly: CCX_OK' --output-format text
 ```
 
-Environment variables take precedence over the defaults. For example, to use the API proxy:
+Without an API key, ccx selects Claudish's ChatGPT route (`cx@`). An `OPENAI_API_KEY` in the environment, or a legacy key in `~/.codex/auth.json`, selects the paid API route (`oai@`). For example, to use an API proxy:
 
 ```powershell
 $env:OPENAI_API_KEY = '<proxy-token>'
@@ -53,7 +61,7 @@ $env:OPENAI_BASE_URL = '<proxy_url>'
 ccx
 ```
 
-`OPENAI_BASE_URL` accepts the usual OpenAI SDK form ending in `/v1`; `ccx` removes that suffix because Claudish appends the versioned endpoint itself. Without the variables, the key falls back to `~/.codex/auth.json` and the base URL to `https://api.openai.com`.
+`OPENAI_BASE_URL` applies only to API-key calls. It accepts the usual OpenAI SDK form ending in `/v1`; ccx removes that suffix because Claudish appends the versioned endpoint itself. The default API base URL is `https://api.openai.com`. Subscription calls go to ChatGPT instead and fail if that login is missing or cannot refresh; they never fall back to a paid API key.
 
 Set the OpenAI model explicitly with either wrapper form:
 
@@ -68,7 +76,7 @@ ccx --model=gpt-6-astra -p 'Summarize this repository'
 ccx --model gpt-6-astra -- --verbose
 ```
 
-OpenAI model IDs use the configured OpenAI endpoint. Native Claude IDs prefer `ANTHROPIC_API_KEY` and otherwise use the existing Claude Code subscription login. The task UI and transcript therefore report the model that actually handled each task.
+OpenAI model IDs use the selected subscription or API route. Native Claude requests prefer `ANTHROPIC_API_KEY` and otherwise use the existing Claude Code subscription login. The task UI and transcript therefore report the model that actually handled each task.
 
 PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
 

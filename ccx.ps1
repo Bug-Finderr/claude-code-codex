@@ -7,9 +7,8 @@ function Get-OpenAIKey {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($EnvironmentKey)) { return $EnvironmentKey }
-    if (-not (Test-Path -LiteralPath $AuthPath)) { throw "Codex auth file not found: $AuthPath" }
+    if (-not (Test-Path -LiteralPath $AuthPath)) { return }
     $auth = Get-Content -Raw -LiteralPath $AuthPath | ConvertFrom-Json
-    if (-not $auth.OPENAI_API_KEY) { throw "OPENAI_API_KEY is missing from $AuthPath" }
     $auth.OPENAI_API_KEY
 }
 
@@ -59,12 +58,13 @@ function Get-ClaudishArguments {
     param(
         [Parameter(Mandatory)][string]$ClaudishPath,
         [Parameter(Mandatory)][string]$Model,
+        [switch]$UseSubscription,
         [string[]]$ClaudeArgs = @()
     )
 
     $arguments = @(
         $ClaudishPath,
-        '--model', "oai@$Model",
+        '--model', "$(if ($UseSubscription) { 'cx' } else { 'oai' })@$Model",
         '--models-skip-update',
         '--preserve-request-models',
         '--log-off',
@@ -81,7 +81,7 @@ function Invoke-CcxCommand {
     param(
         [Parameter(Mandatory)][string]$BunPath,
         [string[]]$ClaudishArgs = @(),
-        [Parameter(Mandatory)][string]$OpenAIKey,
+        [AllowEmptyString()][string]$OpenAIKey,
         [string]$OpenAIBaseUrl = 'https://api.openai.com'
     )
 
@@ -122,11 +122,15 @@ function Invoke-Ccx {
         throw "Claudish is not installed. Run 'bun install' in $PSScriptRoot."
     }
 
+    $openAIKey = Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json')
+    if ([string]::IsNullOrWhiteSpace($openAIKey) -and -not (Test-Path -LiteralPath (Join-Path $HOME '.claudish/codex-oauth.json'))) {
+        throw "Sign in to ChatGPT first: bun `"$claudishPath`" login codex"
+    }
     $claudishArgs = @(Get-ClaudishArguments `
         -ClaudishPath $claudishPath `
         -Model $parsed.Model `
+        -UseSubscription:([string]::IsNullOrWhiteSpace($openAIKey)) `
         -ClaudeArgs $parsed.ClaudeArgs)
-    $openAIKey = Get-OpenAIKey -AuthPath (Join-Path $HOME '.codex/auth.json')
     Invoke-CcxCommand `
         -BunPath $bun.Source `
         -ClaudishArgs $claudishArgs `

@@ -134,7 +134,8 @@ Test-Case 'environment key takes precedence and auth file remains the fallback' 
         Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey 'env-openai-key') 'env-openai-key' 'environment key'
         Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey '') 'fake-openai-key' 'auth file key'
         Set-Content -LiteralPath $fakeAuth -Value '{"auth_mode":"chatgpt"}'
-        Assert-Throws { Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey '' } "OPENAI_API_KEY is missing from $fakeAuth" 'missing key'
+        Assert-True ([string]::IsNullOrWhiteSpace((Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey ''))) 'ChatGPT auth needs no API key'
+        Assert-True ([string]::IsNullOrWhiteSpace((Get-OpenAIKey -AuthPath "$testDrive/missing.json" -EnvironmentKey ''))) 'Claudish login needs no Codex auth file'
     } finally {
         Remove-Item -LiteralPath $testDrive -Recurse -Force
     }
@@ -144,6 +145,13 @@ Test-Case 'SDK-style OpenAI base URLs are normalized for Claudish' {
     Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl '') 'https://api.openai.com' 'official fallback'
     Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl 'https://proxy.invalid/v1/') 'https://proxy.invalid' 'SDK-style base URL'
     Assert-Equal (Get-ClaudishOpenAIBaseUrl -BaseUrl 'https://proxy.invalid/custom') 'https://proxy.invalid/custom' 'custom path'
+}
+
+Test-Case 'subscription routing keeps the requested model without an API key' {
+    $arguments = @(Get-ClaudishArguments -ClaudishPath 'fake.js' -Model 'gpt-6-astra' -UseSubscription)
+    Assert-Equal $arguments[2] 'cx@gpt-6-astra' 'ChatGPT route'
+    $arguments = @(Get-ClaudishArguments -ClaudishPath 'fake.js' -Model 'gpt-test')
+    Assert-Equal $arguments[2] 'oai@gpt-test' 'API route'
 }
 
 Test-Case 'Claudish arguments defer all modes to the patched actual-handle classifier' {
@@ -227,10 +235,13 @@ Test-Case 'missing native command restores environment and retains failure exit'
     }
 }
 
-Test-Case 'patched real Claudish configures the Claude child environment' {
+foreach ($authMode in 'api', 'subscription', 'missing', 'expired') {
+Test-Case "patched real Claudish routing and Claude child environment ($authMode)" {
+    $useSubscription = $authMode -ne 'api'
+    $expectAuthFailure = $authMode -in 'missing', 'expired'
     $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-claudish-test-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $testDrive | Out-Null
-    $names = @('CLAUDE_PATH', 'HOME', 'USERPROFILE', 'LOCALAPPDATA')
+    $names = @('CLAUDE_PATH', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'CCX_TEST_AUTH_MODE', 'OPENAI_CODEX_API_KEY')
     $saved = @{}
     try {
         $fakeClaude = Join-Path $testDrive 'claude.cmd'
@@ -255,7 +266,7 @@ const agentInput = async (model) => {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      model: "oai@gpt-6-astra",
+      model: process.env.CLAUDISH_ACTIVE_MODEL_NAME,
       max_tokens: 64,
       stream: true,
       messages: [{ role: "user", content: `delegate ${model}` }],
@@ -267,6 +278,10 @@ const agentInput = async (model) => {
     }),
   });
   const body = await response.text();
+  if (["missing", "expired"].includes(process.env.CCX_TEST_AUTH_MODE)) {
+    if (response.ok) throw new Error("Missing subscription login was accepted");
+    return null;
+  }
   if (!response.ok) throw new Error(`Agent request failed (${response.status}): ${body}`);
   const deltas = body.split("\n")
     .filter((line) => line.startsWith("data: "))
@@ -285,12 +300,19 @@ await Bun.write(process.env.CCX_AGENT_CAPTURE_PATH, JSON.stringify([
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input.url;
+  if (url === "https://auth.openai.com/oauth/token") return Response.json({ error: "invalid_grant" }, { status: 401 });
   if (url === "https://api.anthropic.com/v1/messages") {
     await Bun.write(process.env.CCX_UPSTREAM_CAPTURE_PATH, JSON.stringify(Object.fromEntries(new Headers(init.headers))));
     return Response.json({ id: "msg_test", type: "message", role: "assistant", model: "claude-fable-5", content: [{ type: "text", text: "OK" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } });
   }
-  if (url === "https://api.openai.com/v1/responses") {
+  if (url === "https://api.openai.com/v1/responses" || url === "https://chatgpt.com/backend-api/codex/responses") {
+    await Bun.write(process.env.CCX_AGENT_CAPTURE_PATH + ".request", url);
+    const subscription = url.startsWith("https://chatgpt.com/");
+    if (subscription !== !process.env.OPENAI_API_KEY) throw new Error("Wrong billing route");
+    const headers = new Headers(init.headers);
+    if (subscription && (headers.get("authorization") !== "Bearer fake-subscription-token" || headers.get("chatgpt-account-id") !== "fake-account")) throw new Error("Missing subscription credentials");
     const request = JSON.parse(init.body);
+    if (request.model !== "gpt-6-astra") throw new Error("Requested model changed");
     const toolName = request.tools[0].name;
     const model = JSON.stringify(request.input).includes("fable") ? "fable" : "sonnet";
     const callId = `call_${model}`;
@@ -339,8 +361,14 @@ exit /b %ERRORLEVEL%
         $env:HOME = $testDrive
         $env:USERPROFILE = $testDrive
         $env:LOCALAPPDATA = $testDrive
+        $env:CCX_TEST_AUTH_MODE = $authMode
+        $env:OPENAI_CODEX_API_KEY = 'fake-paid-fallback'
         $claudishHome = Join-Path $testDrive '.claudish'
         New-Item -ItemType Directory -Path $claudishHome | Out-Null
+        if ($authMode -ne 'missing') {
+            $expiry = if ($authMode -eq 'expired') { 1 } else { 4102444800000 }
+            Set-Content -LiteralPath (Join-Path $claudishHome 'codex-oauth.json') -Value "{`"access_token`":`"fake-subscription-token`",`"refresh_token`":`"fake-refresh`",`"expires_at`":$expiry,`"account_id`":`"fake-account`"}"
+        }
         Set-Content -LiteralPath (Join-Path $claudishHome 'all-models.json') -Value '{"version":2,"lastUpdated":"2026-08-06T00:00:00.000Z","entries":[{"modelId":"gpt-6-astra","aliases":["gpt-6-astra"],"contextWindow":1050000,"aggregators":[{"provider":"openai","contextWindow":1050000}]}],"models":[]}'
         $oldCapturePath = $env:CCX_ENV_CAPTURE_PATH
         $oldSettingsCapturePath = $env:CCX_SETTINGS_CAPTURE_PATH
@@ -358,11 +386,12 @@ exit /b %ERRORLEVEL%
             $claudishArgs = @('--preload', $preloadScript) + @(Get-ClaudishArguments `
                 -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
                 -Model 'gpt-6-astra' `
+                -UseSubscription:$useSubscription `
                 -ClaudeArgs @('-p', 'smoke', '--settings', $userSettingsPath))
             $output = @(Invoke-CcxCommand `
                 -BunPath (Get-Command bun -CommandType Application).Source `
                 -ClaudishArgs $claudishArgs `
-                -OpenAIKey 'fake-openai-key')
+                -OpenAIKey $(if ($useSubscription) { '' } else { 'fake-openai-key' }))
         } finally {
             $env:CCX_ENV_CAPTURE_PATH = $oldCapturePath
             $env:CCX_SETTINGS_CAPTURE_PATH = $oldSettingsCapturePath
@@ -370,6 +399,11 @@ exit /b %ERRORLEVEL%
             $env:CCX_FAKE_REQUEST_SCRIPT = $oldFakeRequestScript
             $env:CCX_AGENT_CAPTURE_PATH = $oldAgentCapturePath
             $env:ANTHROPIC_API_KEY = $oldAnthropicApiKey
+        }
+        if ($authMode -eq 'missing') {
+            Assert-True ($script:CcxExitCode -ne 0) 'missing subscription login blocks startup'
+            Assert-True (-not (Test-Path -LiteralPath "$agentCapturePath.request")) 'missing subscription login never sends a paid request'
+            return
         }
         Assert-Equal $script:CcxExitCode 0 'Claudish smoke exit code'
         Assert-Equal $output.Count 0 'Claudish smoke stdout'
@@ -385,13 +419,19 @@ exit /b %ERRORLEVEL%
         $upstreamHeaders = Get-Content -LiteralPath $upstreamCapturePath -Raw | ConvertFrom-Json
         Assert-Equal $upstreamHeaders.'x-api-key' 'fake-anthropic-key' 'configured API key reaches Anthropic'
         Assert-True (-not $upstreamHeaders.PSObject.Properties['authorization']) 'subscription OAuth does not override the API key'
-        $agentInputs = Get-Content -LiteralPath $agentCapturePath -Raw | ConvertFrom-Json
-        Assert-True (-not $agentInputs[0].PSObject.Properties['model']) 'default Sonnet Agent input inherits the routed main model'
-        Assert-Equal $agentInputs[1].model 'fable' 'explicit Agent model is preserved'
+        if ($expectAuthFailure) {
+            Assert-True (-not (Test-Path -LiteralPath "$agentCapturePath.request")) 'failed subscription login never sends a paid request'
+        } else {
+            $agentInputs = Get-Content -LiteralPath $agentCapturePath -Raw | ConvertFrom-Json
+            Assert-True (-not $agentInputs[0].PSObject.Properties['model']) 'default Sonnet Agent input inherits the routed main model'
+            Assert-Equal $agentInputs[1].model 'fable' 'explicit Agent model is preserved'
+        }
     } finally {
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
         Remove-Item -LiteralPath $testDrive -Recurse -Force
     }
+}
+
 }
 
 Test-Case 'OpenAI Responses starts workflow usage from the current request' {

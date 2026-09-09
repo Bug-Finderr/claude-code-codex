@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf029afe23 100644
+index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..9f0bc6b0e452327766ddcb82ee9e386d6a59be79 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -19104,6 +19104,8 @@ ${msg}`;
@@ -11,7 +11,19 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
      }
    }
    return messages;
-@@ -33609,7 +33611,7 @@ data: ${JSON.stringify(data)}
+@@ -27806,10 +27808,7 @@ class CodexOAuthHalf {
+   }
+ }
+ function makeCodexCredential() {
+-  return new CompositeCredentialProvider("openai-codex", new CodexOAuthHalf, new ApiKeyCredentialProvider({
+-    catalogName: "openai-codex",
+-    envVar: "OPENAI_CODEX_API_KEY"
+-  }));
++  return new CodexOAuthHalf;
+ }
+ var CODEX_RESPONSES_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
+ var init_codex_credential = __esm(() => {
+@@ -33609,7 +33608,7 @@ data: ${JSON.stringify(data)}
            model: opts.modelName,
            stop_reason: null,
            stop_sequence: null,
@@ -20,7 +32,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
          }
        });
        send("ping", { type: "ping" });
-@@ -34956,10 +34958,22 @@ class ComposedHandler {
+@@ -34956,10 +34955,22 @@ class ComposedHandler {
            toolNameMap: adapter.getToolNameMap(),
            contextWindow: lookupModelForProvider(this.bareModelName, this.provider.name),
            onApiError,
@@ -46,7 +58,20 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
            onAssistantText: (text, kind) => behaviorSession?.observeText(text, kind),
            onToolCallObserved: observeToolCall,
            onTurnEnd: () => behaviorSession?.finishTurn()
-@@ -35851,7 +35865,7 @@ function requiresResponsesApi(modelName, cachePath) {
+@@ -35709,11 +35720,7 @@ var init_openai_codex = __esm(() => {
+     cachedCacheKeyFor;
+     cachedCacheKey = "";
+     async refreshAuth() {
+-      try {
+-        this.cachedAuth = await credentials.getRequestAuth("openai-codex", { model: "" });
+-      } catch {
+-        this.cachedAuth = null;
+-      }
++      this.cachedAuth = await credentials.getRequestAuth("openai-codex", { model: "" });
+       const signedWithOAuth = this.cachedAuth?.arm === "oauth";
+       recordSignedArm("openai-codex", signedWithOAuth ? "subscription" : "metered");
+     }
+@@ -35851,7 +35858,7 @@ function requiresResponsesApi(modelName, cachePath) {
      return true;
    }
    const name = modelName.toLowerCase();
@@ -55,7 +80,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
  }
  async function createHandlerForProvider(ctx) {
    const definitionName = ctx.provider.name === "gemini" ? "google" : ctx.provider.name;
-@@ -45485,18 +45499,16 @@ class NativeHandler {
+@@ -45485,18 +45492,16 @@ class NativeHandler {
        "Content-Type": "application/json",
        "anthropic-version": originalHeaders["anthropic-version"] || "2023-06-01"
      };
@@ -81,7 +106,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
        if (fallbackKey) {
          headers["x-api-key"] = fallbackKey;
        }
-@@ -46641,9 +46653,9 @@ async function createProxyServer(port, _openrouterApiKey, model, monitorMode = f
+@@ -46641,9 +46646,9 @@ async function createProxyServer(port, _openrouterApiKey, model, monitorMode = f
        } else if (req.includes("haiku") && modelMap.haiku) {
          target = modelMap.haiku;
          wasFromModelMap = true;
@@ -93,7 +118,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
        target = model;
      }
      const invocationMode = detectInvocationMode(target, wasFromModelMap);
-@@ -56278,6 +56290,7 @@ async function parseArgs(args) {
+@@ -56278,6 +56283,7 @@ async function parseArgs(args) {
      freeOnly: false,
      noLogs: false,
      diagMode: "auto",
@@ -101,7 +126,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
      claudeArgs: []
    };
    const claudishModel = process.env[ENV.CLAUDISH_MODEL];
-@@ -56418,6 +56431,8 @@ async function parseArgs(args) {
+@@ -56418,6 +56424,8 @@ async function parseArgs(args) {
        config.forceUpdate = true;
      } else if (arg === "--models-skip-update") {
        config.skipModelsUpdate = true;
@@ -110,7 +135,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
      } else if (arg === "--profile") {
        const profileArg = args[++i];
        if (!profileArg) {
-@@ -56618,7 +56633,7 @@ Usage:  claudish --models --provider <slug>`);
+@@ -56618,7 +56626,7 @@ Usage:  claudish --models --provider <slug>`);
      } else if (arg === "--") {
        const rest = args.slice(i + 1);
        config.claudeArgs.push(...rest);
@@ -119,7 +144,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
          config._hasPositionalPrompt = true;
        break;
      } else if (arg === "--resume" && (i + 1 >= args.length || args[i + 1].startsWith("-"))) {
-@@ -56638,7 +56653,7 @@ Usage:  claudish --models --provider <slug>`);
+@@ -56638,7 +56646,7 @@ Usage:  claudish --models --provider <slug>`);
      i++;
    }
    if (!config._hasPositionalPrompt && !config.stdin && !config._hasPrintFlag) {
@@ -128,13 +153,13 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
    }
    if (config._sawVerbose && !config.interactive && !config.claudeArgs.includes("--verbose") && !config.claudeArgs.includes("-v")) {
      config.claudeArgs.push("--verbose");
-@@ -57644,4 +57659,5 @@ ${h("MODEL DISCOVERY")}
+@@ -57644,4 +57652,5 @@ ${h("MODEL DISCOVERY")}
    ${green("--probe-timeout")} ${yellow("<secs>")}                 Per-link timeout for live probes (default: 40)
    ${green("--models-refresh")}                      Force refresh the slim model catalog from Firebase
    ${green("--models-skip-update")}                  Skip the launcher catalog warm step (offline)
 +  ${green("--preserve-request-models")}             Route each request to its resolved model (hybrid)
    ${green("--json")}                                JSON output (with --models / --models-top / --probe)
-@@ -65589,7 +65605,7 @@ function shouldPreserveNativeAuth(config) {
+@@ -65589,7 +65598,7 @@ function shouldPreserveNativeAuth(config) {
    return hasNativeAnthropicMapping(config) || classifierPassthroughEnabled(config) && hasResolvableAnthropicAuth();
  }
  function isProxyAuthMode(config) {
@@ -143,7 +168,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
  }
  function managedSettingsPath() {
    if (isWindows2()) {
-@@ -65892,11 +65908,14 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode, userStatusLi
+@@ -65892,11 +65901,14 @@ function createTempSettingsFile(_modelDisplay, port, proxyAuthMode, userStatusLi
      const segmentNoDir = `if [ -n "$PROVIDER" ]; then ${segmentNoDirWithProvider}; else ${segmentNoDirNoProvider}; fi`;
      statusCommand = userStatusLineCommand ? buildChainedStatusCommand(userStatusLineCommand, readState, segmentNoDir) : `JSON=$(cat); ${dirPrelude}${readState}; ${segmentWithDir}`;
    }
@@ -159,7 +184,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
    const settings = buildClaudishSettingsOverlay(statusLine, proxyAuthMode);
    writeFileSync20(tempPath, JSON.stringify(settings, null, 2), "utf-8");
    return { path: tempPath, statusLine, tokenFilePath };
-@@ -65916,7 +65935,9 @@ function mergeUserSettingsIfPresent(config, tempSettingsPath, statusLine, proxyA
+@@ -65916,7 +65928,9 @@ function mergeUserSettingsIfPresent(config, tempSettingsPath, statusLine, proxyA
    const userSettingsValue = config.claudeArgs[idx + 1];
    try {
      const userSettings = parseSettingsArg(userSettingsValue);
@@ -170,7 +195,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
      if (!("disableClaudeAiConnectors" in userSettings)) {
        userSettings.disableClaudeAiConnectors = true;
      }
-@@ -66040,6 +66061,7 @@ async function runClaudeWithProxy(config, proxyUrl, onCleanup) {
+@@ -66040,6 +66054,7 @@ async function runClaudeWithProxy(config, proxyUrl, onCleanup) {
      CLAUDISH_IS_LOCAL: isLocalModel ? "true" : "false",
      [ENV.CLAUDISH_TOKEN_FILE]: tokenFilePath
    };
@@ -178,7 +203,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
    if (modelId) {
      const parsedSpec = parseModelSpec(modelId);
      const providerDisplayName = parsedSpec.isExplicitProvider ? getProviderByName(parsedSpec.provider)?.displayName : undefined;
-@@ -66070,8 +66092,10 @@ async function runClaudeWithProxy(config, proxyUrl, onCleanup) {
+@@ -66070,8 +66085,10 @@ async function runClaudeWithProxy(config, proxyUrl, onCleanup) {
        if (classifierPassthroughEnabled(config)) {
          console.error("[claudish] classifier passthrough enabled but no Anthropic credentials detected \u2014 " + "classifier requests will fail to authenticate against api.anthropic.com. " + "Map a role to a native Claude model (e.g. --model-sonnet claude-sonnet-5) or set ANTHROPIC_API_KEY.");
        }
@@ -191,7 +216,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
        const realWindow = await computeMainThreadContextWindow(config);
        const contextEnv = resolveContextWindowEnv(realWindow, process.env);
        Object.assign(env, contextEnv.vars);
-@@ -66087,6 +66111,7 @@ async function runClaudeWithProxy(config, proxyUrl, onCleanup) {
+@@ -66087,6 +66104,7 @@ async function runClaudeWithProxy(config, proxyUrl, onCleanup) {
        }
      }
    }
@@ -199,7 +224,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
    const log2 = (message) => {
      if (!config.quiet) {
        if (config.interactive) {
-@@ -69437,7 +69462,7 @@ Team Status`);
+@@ -69437,7 +69455,7 @@ Team Status`);
          console.log(`[claudish] Debug log: ${logFile}`);
        }
      }
@@ -208,7 +233,7 @@ index 94347c3da17e5002d834a5f13afb5ac5dfe041f8..bac4051e79890e2b890ac85e799f6baf
        const updateStep = await traceSpan("startup:update-check", () => checkForUpdatesInteractive(getVersion3(), {
          quiet: cliConfig.quiet,
          canPrompt: !cliConfig.stdin
-@@ -69569,7 +69594,8 @@ Team Status`);
+@@ -69569,7 +69587,8 @@ Team Status`);
        classifier: resolveClassifierConfig(cliConfig, process.env),
        effortOverride: cliConfig.effortOverride,
        modelParams: cliConfig.modelParams,
