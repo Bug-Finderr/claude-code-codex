@@ -6,5 +6,8 @@
   },
   "patchedDependencies": {
     "claudish@9.1.0": "patches/claudish@9.1.0.patch"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
   }
 }

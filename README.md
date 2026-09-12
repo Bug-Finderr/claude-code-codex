@@ -44,6 +44,7 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 - Use the configured Anthropic key inside the proxy, without exposing either provider key to Claude Code.
 - Keep the configured Windows statusline instead of Claudish's fallback.
 - Detect headless output correctly and make `--models-skip-update` skip both catalog and version checks.
+- Pass `/v1/mcp_servers` straight through to `api.anthropic.com` with auth headers preserved (applied by `scripts/postinstall.js` after install; see below). Unlisted paths used to 404 on the proxy, so without it claude.ai connectors never loaded and `/mcp` showed only built-ins.
 
 Upstream 9.0.7 added catalog-based Responses routing. The Astra fallback stays because ccx skips catalog downloads at launch; a missing or older catalog must not change its endpoint. None of the other local changes are replaced by 9.1.0.
 
