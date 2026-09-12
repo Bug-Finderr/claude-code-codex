@@ -1,13 +1,13 @@
-// Restores the claude.ai connector route after `bun install`.
 const fs = require('fs');
 
 const target = 'node_modules/claudish/dist/index.js';
-const routeFragment = 'app.all("/v1/mcp_servers"';
 let source = fs.readFileSync(target, 'utf8');
 
-if (source.includes(routeFragment)) {
-  console.log('claudish mcp route already present');
-} else {
+const routeFragment = 'app.all("/v1/mcp_servers"';
+const flag = 'disableClaudeAiConnectors: true';
+
+let changed = false;
+if (!source.includes(routeFragment)) {
   const marker = '  app.post("/v1/messages/count_tokens"';
   const route = `  app.all("/v1/mcp_servers", async (c) => {
     try {
@@ -27,6 +27,16 @@ if (source.includes(routeFragment)) {
   const idx = source.indexOf(marker);
   if (idx < 0) throw new Error('claudish patch marker (/v1/messages/count_tokens) not found. Re-pin the claudish version.');
   source = source.slice(0, idx) + route + source.slice(idx);
+  changed = true;
+}
+if (source.includes(flag)) {
+  source = source.replace(flag, 'disableClaudeAiConnectors: false');
+  changed = true;
+}
+
+if (changed) {
   fs.writeFileSync(target, source);
-  console.log('patched claudish: claude.ai connector route restored');
+  console.log('patched claudish: connector route + flag restored');
+} else {
+  console.log('claudish connector fix already present');
 }
