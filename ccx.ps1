@@ -1,17 +1,5 @@
 $ErrorActionPreference = 'Stop'
 
-function Get-OpenAIKey {
-    param(
-        [Parameter(Mandatory)][string]$AuthPath,
-        [AllowEmptyString()][string]$EnvironmentKey = $env:OPENAI_API_KEY
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($EnvironmentKey)) { return $EnvironmentKey }
-    if (-not (Test-Path -LiteralPath $AuthPath)) { return }
-    try { $auth = Get-Content -Raw -LiteralPath $AuthPath | ConvertFrom-Json } catch { return }
-    $auth.OPENAI_API_KEY
-}
-
 function Get-ClaudishOpenAIBaseUrl {
     param([AllowEmptyString()][string]$BaseUrl = $env:OPENAI_BASE_URL)
 
@@ -126,7 +114,7 @@ function Invoke-Ccx {
     $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
     $authPath = Join-Path $codexHome 'auth.json'
     $auth = try { if (Test-Path -LiteralPath $authPath) { Get-Content -LiteralPath $authPath -Raw | ConvertFrom-Json } } catch { $null }
-    $openAIKey = Get-OpenAIKey -AuthPath $authPath
+    $openAIKey = if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) { $auth.OPENAI_API_KEY } else { $env:OPENAI_API_KEY }
     $claudishArgs = @(Get-ClaudishArguments `
         -ClaudishPath $claudishPath `
         -Model $parsed.Model `

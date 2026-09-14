@@ -130,18 +130,27 @@ Test-Case 'missing and empty models are rejected precisely' {
 Test-Case 'environment key takes precedence and auth file remains the fallback' {
     $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-auth-test-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $testDrive | Out-Null
+    $oldHome = $env:CODEX_HOME
+    $oldKey = $env:OPENAI_API_KEY
+    function Invoke-CcxCommand { param($BunPath, $ClaudishArgs, $OpenAIKey, $OpenAIBaseUrl) $OpenAIKey }
     try {
+        $env:CODEX_HOME = $testDrive
         $fakeAuth = Join-Path $testDrive 'auth.json'
         Set-Content -LiteralPath $fakeAuth -Value '{"OPENAI_API_KEY":"fake-openai-key"}'
-        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey 'env-openai-key') 'env-openai-key' 'environment key'
-        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey '') 'fake-openai-key' 'auth file key'
+        $env:OPENAI_API_KEY = 'env-openai-key'
+        Assert-Equal (Invoke-Ccx) 'env-openai-key' 'environment key'
+        $env:OPENAI_API_KEY = ''
+        Assert-Equal (Invoke-Ccx) 'fake-openai-key' 'auth file key'
         Set-Content -LiteralPath $fakeAuth -Value '{"auth_mode":"chatgpt"}'
-        Assert-True ([string]::IsNullOrWhiteSpace((Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey ''))) 'ChatGPT auth needs no API key'
-        Assert-True ([string]::IsNullOrWhiteSpace((Get-OpenAIKey -AuthPath "$testDrive/missing.json" -EnvironmentKey ''))) 'Claudish login needs no Codex auth file'
+        Assert-True ([string]::IsNullOrWhiteSpace((Invoke-Ccx))) 'ChatGPT auth needs no API key'
         Set-Content -LiteralPath $fakeAuth -Value '{bad json'
-        Assert-Equal (Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey 'env-openai-key') 'env-openai-key' 'broken auth file does not block an environment key'
-        Assert-True ([string]::IsNullOrWhiteSpace((Get-OpenAIKey -AuthPath $fakeAuth -EnvironmentKey ''))) 'broken auth file leaves Claudish login available'
+        $env:OPENAI_API_KEY = 'env-openai-key'
+        Assert-Equal (Invoke-Ccx) 'env-openai-key' 'broken auth file does not block an environment key'
+        $env:OPENAI_API_KEY = ''
+        Assert-True ([string]::IsNullOrWhiteSpace((Invoke-Ccx))) 'broken auth file leaves Claudish login available'
     } finally {
+        $env:CODEX_HOME = $oldHome
+        $env:OPENAI_API_KEY = $oldKey
         Remove-Item -LiteralPath $testDrive -Recurse -Force
     }
 }
@@ -258,6 +267,8 @@ Test-Case "patched real Claudish routing and Claude child environment ($authMode
         $fakeRequestScript = Join-Path $testDrive 'request.js'
         $preloadScript = Join-Path $testDrive 'preload.js'
         Set-Content -LiteralPath $userSettingsPath -Value '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo user"}]}]},"statusLine":{"type":"command","command":"configured-statusline","padding":0}}'
+        New-Item -ItemType Directory -Path (Join-Path $testDrive '.claude') | Out-Null
+        Copy-Item -LiteralPath $userSettingsPath -Destination (Join-Path $testDrive '.claude/settings.json')
         Set-Content -LiteralPath $fakeRequestScript -Value @'
 const response = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
   method: "POST",
@@ -266,15 +277,16 @@ const response = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
 });
 if (!response.ok) process.exit(1);
 
-const agentInput = async (model) => {
+const agentInput = async (model, effort = model === "sonnet" ? "low" : "max") => {
   const response = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       model: process.env.CLAUDISH_ACTIVE_MODEL_NAME,
+      output_config: { effort },
       max_tokens: 64,
       stream: true,
-      messages: [{ role: "user", content: `delegate ${model}` }],
+      messages: [{ role: "user", content: `delegate ${model} ${effort}` }],
       tools: [{
         name: "Agent",
         description: "Delegate work",
@@ -299,6 +311,7 @@ const agentInput = async (model) => {
 await Bun.write(process.env.CCX_AGENT_CAPTURE_PATH, JSON.stringify([
   await agentInput("sonnet"),
   await agentInput("fable"),
+  await agentInput("fable", "xhigh"),
 ]));
 '@
         Set-Content -LiteralPath $preloadScript -Value @'
@@ -323,6 +336,8 @@ globalThis.fetch = async (input, init) => {
     if (request.model !== "gpt-6-astra") throw new Error("Requested model changed");
     const toolName = request.tools[0].name;
     const model = JSON.stringify(request.input).includes("fable") ? "fable" : "sonnet";
+    const effort = JSON.stringify(request.input).includes("xhigh") ? "xhigh" : model === "sonnet" ? "low" : "max";
+    if (subscription && request.reasoning?.effort !== effort) throw new Error("Astra effort changed");
     const callId = `call_${model}`;
     const args = JSON.stringify({ description: "probe", prompt: "reply ok", model });
     const events = [
@@ -401,7 +416,7 @@ exit /b %ERRORLEVEL%
                 -ClaudishPath (Join-Path $root 'node_modules/claudish/dist/index.js') `
                 -Model 'gpt-6-astra' `
                 -UseSubscription:$useSubscription `
-                -ClaudeArgs @('-p', 'smoke', '--settings', $userSettingsPath))
+                -ClaudeArgs $(if ($authMode -eq 'api') { @('-p', 'smoke') } else { @('-p', 'smoke', '--settings', $userSettingsPath) }))
             $output = @(Invoke-CcxCommand `
                 -BunPath (Get-Command bun -CommandType Application).Source `
                 -ClaudishArgs $claudishArgs `
@@ -428,8 +443,12 @@ exit /b %ERRORLEVEL%
             'anthropic-token-absent'
         ) 'Claude child auth environment'
         $settings = Get-Content -LiteralPath $settingsCapturePath -Raw | ConvertFrom-Json
-        Assert-Equal $settings.hooks.PreToolUse.Count 1 'user hook survives settings merge'
-        Assert-Equal $settings.hooks.PreToolUse[0].matcher 'Bash' 'user hook remains unchanged'
+        Assert-True ($settings.disableClaudeAiConnectors -ne $true) 'Claudish does not disable connector discovery'
+        Assert-True ($settings.forceLoginMethod -ne 'console') 'Claude login stays available for connectors'
+        if ($authMode -ne 'api') {
+            Assert-Equal $settings.hooks.PreToolUse.Count 1 'user hook survives settings merge'
+            Assert-Equal $settings.hooks.PreToolUse[0].matcher 'Bash' 'user hook remains unchanged'
+        }
         Assert-Equal $settings.statusLine.command 'configured-statusline' 'configured statusline replaces Claudish fallback'
         $upstreamHeaders = Get-Content -LiteralPath $upstreamCapturePath -Raw | ConvertFrom-Json
         Assert-Equal $upstreamHeaders.'x-api-key' 'fake-anthropic-key' 'configured API key reaches Anthropic'
@@ -465,7 +484,7 @@ Test-Case 'OpenAI Responses starts workflow usage from the current request' {
 
 Test-Case 'Claudish preserves mid-turn steering messages' {
     $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
-    Assert-True ($source.Contains('else if (msg.role === "system")')) 'mid-conversation system messages reach OpenAI'
+    Assert-True ($source.Contains('if (msg.role === "user" || msg.role === "system")')) 'mid-conversation system messages reach OpenAI'
 }
 
 Test-Case 'real Claudish passes redirected stdout handles to fake Claude under assignment and pipeline' {
