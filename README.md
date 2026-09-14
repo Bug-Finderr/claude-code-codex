@@ -33,19 +33,31 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 
 ## Patched Claudish behavior
 
-`ccx` uses Claudish 9.1.0 with these local changes:
+`ccx` uses Claudish 9.3.0 with these local changes:
 
 - Keep each request's model. Ordinary Sonnet Agent calls inherit the selected OpenAI model; explicit Fable, Opus, and workflow models stay unchanged.
 - Fall back to a configured API key if ChatGPT credentials cannot load or refresh. API fallback uses API billing.
 - Reuse an existing file-based Codex ChatGPT login without a second sign-in or token copies.
 - Route Astra through OpenAI Responses even without a current model catalog.
+- Preserve Astra's requested `xhigh` and `max` effort on the ChatGPT route instead of reducing it to `high`.
 - Start workflow token counts with an estimate of the current request, not the previous turn.
 - Forward mid-turn steering messages to OpenAI.
 - Use the configured Anthropic key inside the proxy, without exposing either provider key to Claude Code.
 - Keep the configured Windows statusline instead of Claudish's fallback.
+- Allow Claude Code to load your claude.ai connectors using its existing login.
 - Detect headless output correctly and make `--models-skip-update` skip both catalog and version checks.
 
-Upstream 9.0.7 added catalog-based Responses routing. The Astra fallback stays because ccx skips catalog downloads at launch; a missing or older catalog must not change its endpoint. None of the other local changes are replaced by 9.1.0.
+Upstream 9.2-9.3 improves interrupted streams, advisor calls, and inherited placeholder credentials. Those fixes stay unchanged. They do not replace the local behaviors above. The Astra routing fallback stays because ccx skips catalog downloads at launch.
+
+The launcher reads Codex auth only once. The patch also shares identical steering handling, selects the Windows statusline once, and uses one native-auth decision chain.
+
+## Claude.ai connectors
+
+Sign in to Claude Code with the same Claude account you use on the web, then open `/mcp` inside ccx. Claudish no longer forces `disableClaudeAiConnectors: true`. Your own connector-disable settings and organization policies still apply.
+
+Claude Code 2.1.270 fetches discovery and connects through Anthropic's own endpoints, not the local model proxy. No extra proxy route or dummy Anthropic token is needed. Model calls can still use ChatGPT while connectors use your Claude login. A connector marked "needs authentication" must be signed in separately; enabling discovery does not grant it access.
+
+See [Claude Code's connector documentation](https://code.claude.com/docs/en/mcp).
 
 ## Usage
 
