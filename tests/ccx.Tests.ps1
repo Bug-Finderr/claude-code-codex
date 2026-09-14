@@ -335,6 +335,7 @@ globalThis.fetch = async (input, init) => {
     const request = JSON.parse(init.body);
     if (request.model !== "gpt-6-astra") throw new Error("Requested model changed");
     const toolName = request.tools[0].name;
+    if (request.tools[0].strict !== false || request.tools[0].parameters.required?.includes("model")) throw new Error("Optional tool arguments became mandatory");
     const model = JSON.stringify(request.input).includes("fable") ? "fable" : "sonnet";
     const effort = JSON.stringify(request.input).includes("xhigh") ? "xhigh" : model === "sonnet" ? "low" : "max";
     if (subscription && request.reasoning?.effort !== effort) throw new Error("Astra effort changed");

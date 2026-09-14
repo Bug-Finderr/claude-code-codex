@@ -45,6 +45,7 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 - Use the configured Anthropic key inside the proxy, without exposing either provider key to Claude Code.
 - Keep the configured Windows statusline instead of Claudish's fallback.
 - Allow Claude Code to load your claude.ai connectors using its existing login.
+- Keep optional tool arguments optional in Responses, so models need not invent pagination tokens or other missing values.
 - Detect headless output correctly and make `--models-skip-update` skip both catalog and version checks.
 
 Upstream 9.2-9.3 improves interrupted streams, advisor calls, and inherited placeholder credentials. Those fixes stay unchanged. They do not replace the local behaviors above. The Astra routing fallback stays because ccx skips catalog downloads at launch.
