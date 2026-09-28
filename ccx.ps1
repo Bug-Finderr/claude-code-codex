@@ -57,8 +57,7 @@ function Get-ClaudishArguments {
         '--preserve-request-models',
         '--log-off',
         '--log-diag', 'off',
-        '--no-auto-approve',
-        '--dangerously-skip-permissions'
+        '--auto-approve'
     )
     $arguments += '--'
     $arguments += $ClaudeArgs
@@ -77,7 +76,7 @@ function Invoke-CcxCommand {
         OPENAI_API_KEY = $OpenAIKey
         OPENAI_BASE_URL = $OpenAIBaseUrl
         OPENAI_CODEX_BASE_URL = $OpenAIBaseUrl
-        CLAUDISH_STATS = 'off'
+        CLAUDISH_STATS = '0'
         CLAUDISH_TELEMETRY = '0'
         ANTHROPIC_AUTH_TOKEN = $null
     }

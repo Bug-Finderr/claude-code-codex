@@ -33,10 +33,10 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 
 ## Patched Claudish behavior
 
-`ccx` uses Claudish 9.3.0 with these local changes:
+`ccx` uses Claudish 10.3.0 with these local changes:
 
 - Keep each request's model. Ordinary Sonnet Agent calls inherit the selected OpenAI model; explicit Fable, Opus, and workflow models stay unchanged.
-- Fall back to a configured API key if ChatGPT credentials cannot load or refresh. API fallback uses API billing.
+- Fall back to a configured API key if ChatGPT credentials cannot load or refresh, but not during network failures. API fallback uses API billing.
 - Reuse an existing file-based Codex ChatGPT login without a second sign-in or token copies.
 - Route Astra through OpenAI Responses even without a current model catalog.
 - Preserve Astra's requested `xhigh` and `max` effort on the ChatGPT route instead of reducing it to `high`.
@@ -48,15 +48,11 @@ function ccx { & 'D:/Files/Dev/ccx/ccx.ps1' @args }
 - Keep optional tool arguments optional in Responses, so models need not invent pagination tokens or other missing values.
 - Detect headless output correctly and make `--models-skip-update` skip both catalog and version checks.
 
-Upstream 9.2-9.3 improves interrupted streams, advisor calls, and inherited placeholder credentials. Those fixes stay unchanged. They do not replace the local behaviors above. The Astra routing fallback stays because ccx skips catalog downloads at launch.
-
-The launcher reads Codex auth only once. The patch also shares identical steering handling, selects the Windows statusline once, and uses one native-auth decision chain.
-
 ## Claude.ai connectors
 
 Sign in to Claude Code with the same Claude account you use on the web, then open `/mcp` inside ccx. Claudish no longer forces `disableClaudeAiConnectors: true`. Your own connector-disable settings and organization policies still apply.
 
-Claude Code 2.1.270 fetches discovery and connects through Anthropic's own endpoints, not the local model proxy. No extra proxy route or dummy Anthropic token is needed. Model calls can still use ChatGPT while connectors use your Claude login. A connector marked "needs authentication" must be signed in separately; enabling discovery does not grant it access.
+Claude Code fetches discovery and connects through Anthropic's own endpoints, not the local model proxy. No extra proxy route or dummy Anthropic token is needed. Model calls can still use ChatGPT while connectors use your Claude login. A connector marked "needs authentication" must be signed in separately; enabling discovery does not grant it access.
 
 See [Claude Code's connector documentation](https://code.claude.com/docs/en/mcp).
 
@@ -77,7 +73,7 @@ $env:OPENAI_BASE_URL = '<proxy_url>'
 ccx
 ```
 
-`OPENAI_BASE_URL` applies to direct API calls and API fallback. It accepts the usual OpenAI SDK form ending in `/v1`; ccx removes that suffix because Claudish appends the versioned endpoint itself. The default API base URL is `https://api.openai.com`. Subscription calls go to ChatGPT instead. Fallback accepts `OPENAI_CODEX_API_KEY` or `OPENAI_API_KEY`; it does not retry quota errors or general request failures through the paid API. If neither login nor a usable key is available, the request fails.
+`OPENAI_BASE_URL` applies to direct API calls and API fallback. It accepts the usual OpenAI SDK form ending in `/v1`; ccx removes that suffix because Claudish appends the versioned endpoint itself. The default API base URL is `https://api.openai.com`. Subscription calls go to ChatGPT instead. Fallback accepts `OPENAI_CODEX_API_KEY` or `OPENAI_API_KEY`; it does not retry network failures, quota errors, or general request failures through the paid API. If neither login nor a usable key is available, the request fails.
 
 Set the OpenAI model explicitly with either wrapper form:
 
@@ -96,7 +92,7 @@ OpenAI model IDs use the selected subscription or API route. Native Claude reque
 
 PowerShell invokes Bun directly, so stdout remains naturally capturable, incremental, and pipeable; stderr and Ctrl+C retain native behavior. The child exit code becomes the script exit code rather than output.
 
-Every invocation disables Claudish auto approval and passes Claude Code's `--dangerously-skip-permissions` flag before the passthrough separator. It temporarily sets the selected provider variables and restores the parent environment afterward.
+Every invocation uses Claudish's `--auto-approve`, which passes `--dangerously-skip-permissions` to Claude Code. It temporarily sets the selected provider variables and restores the parent environment afterward.
 
 `ccx` invokes the pinned local Claudish entry point directly with Bun. It does not start or manage a separate local gateway daemon.
 

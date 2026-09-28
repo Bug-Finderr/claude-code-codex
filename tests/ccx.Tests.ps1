@@ -72,7 +72,7 @@ function Assert-EnvironmentRestoredAfterCommand([int]$ExitCode) {
             [Environment]::SetEnvironmentVariable($name, $parent[$name], 'Process')
         }
         $PSNativeCommandUseErrorActionPreference = $true
-        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "off"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:ANTHROPIC_API_KEY -eq "parent-anthropic-key"), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
+        $childScript = '$state = @([bool]$env:OPENAI_API_KEY, ($env:OPENAI_BASE_URL -eq "https://proxy.invalid"), ($env:CLAUDISH_STATS -eq "0"), ($env:CLAUDISH_TELEMETRY -eq "0"), ($env:ANTHROPIC_API_KEY -eq "parent-anthropic-key"), (-not [bool]$env:ANTHROPIC_AUTH_TOKEN)); [string]::Join("|", $state); exit $env:CCX_TEST_EXIT'
         $oldTestExit = $env:CCX_TEST_EXIT
         $env:CCX_TEST_EXIT = [string]$ExitCode
         try {
@@ -174,10 +174,10 @@ Test-Case 'Claudish arguments defer all modes to the patched actual-handle class
         Assert-True ($arguments -notcontains '--interactive') 'interactive control flag is absent'
         Assert-True ($arguments -notcontains '--json') 'JSON control flag is absent'
         $preserveModels = [Array]::IndexOf($arguments, '--preserve-request-models')
-        $dangerous = [Array]::IndexOf($arguments, '--dangerously-skip-permissions')
+        $dangerous = [Array]::IndexOf($arguments, '--auto-approve')
         $separator = [Array]::IndexOf($arguments, '--')
         Assert-True ($preserveModels -ge 0 -and $preserveModels -lt $separator) 'requested-model routing precedes separator'
-        Assert-True ($dangerous -lt $separator) 'auto approval precedes separator'
+        Assert-True ($dangerous -ge 0 -and $dangerous -lt $separator) 'auto approval precedes separator'
         $forwarded = if ($separator + 1 -lt $arguments.Count) { @($arguments[($separator + 1)..($arguments.Count - 1)]) } else { @() }
         Assert-Sequence $forwarded $claudeArgs 'post-separator Claude arguments'
     }
@@ -249,10 +249,10 @@ Test-Case 'missing native command restores environment and retains failure exit'
     }
 }
 
-foreach ($authMode in 'api', 'subscription', 'codex', 'codex-expired', 'missing', 'expired', 'unconfigured', 'expired-no-key') {
+foreach ($authMode in 'api', 'subscription', 'codex', 'codex-expired', 'missing', 'expired', 'unconfigured', 'expired-no-key', 'offline') {
 Test-Case "patched real Claudish routing and Claude child environment ($authMode)" {
     $useSubscription = $authMode -ne 'api'
-    $expectAuthFailure = $authMode -in 'unconfigured', 'expired-no-key'
+    $expectAuthFailure = $authMode -in 'unconfigured', 'expired-no-key', 'offline'
     $testDrive = Join-Path ([System.IO.Path]::GetTempPath()) "ccx-claudish-test-$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $testDrive | Out-Null
     $names = @('CLAUDE_PATH', 'HOME', 'USERPROFILE', 'LOCALAPPDATA', 'CODEX_HOME', 'CCX_TEST_AUTH_MODE', 'OPENAI_CODEX_API_KEY')
@@ -280,13 +280,16 @@ if (!response.ok) process.exit(1);
 const agentInput = async (model, effort = model === "sonnet" ? "low" : "max") => {
   const response = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/messages`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-claudish-no-recovery": "1" },
     body: JSON.stringify({
       model: process.env.CLAUDISH_ACTIVE_MODEL_NAME,
       output_config: { effort },
       max_tokens: 64,
       stream: true,
-      messages: [{ role: "user", content: `delegate ${model} ${effort}` }],
+      messages: [
+        { role: "user", content: `delegate ${model} ${effort} ${"context ".repeat(80)}` },
+        { role: "system", content: "steer-marker" },
+      ],
       tools: [{
         name: "Agent",
         description: "Delegate work",
@@ -295,14 +298,17 @@ const agentInput = async (model, effort = model === "sonnet" ? "low" : "max") =>
     }),
   });
   const body = await response.text();
-  if (["unconfigured", "expired-no-key"].includes(process.env.CCX_TEST_AUTH_MODE)) {
+  if (["unconfigured", "expired-no-key", "offline"].includes(process.env.CCX_TEST_AUTH_MODE)) {
     if (response.ok) throw new Error("Missing subscription login was accepted");
     return null;
   }
   if (!response.ok) throw new Error(`Agent request failed (${response.status}): ${body}`);
-  const deltas = body.split("\n")
+  const events = body.split("\n")
     .filter((line) => line.startsWith("data: "))
-    .map((line) => JSON.parse(line.slice(6)))
+    .map((line) => JSON.parse(line.slice(6)));
+  if (!(events.find((event) => event.type === "message_start")?.message.usage.input_tokens > 100))
+    throw new Error("Workflow usage did not start with the current request estimate");
+  const deltas = events
     .filter((event) => event.type === "content_block_delta" && event.delta.type === "input_json_delta")
     .map((event) => event.delta.partial_json);
   if (!deltas.length) throw new Error(`No Agent arguments: ${body}`);
@@ -318,7 +324,10 @@ await Bun.write(process.env.CCX_AGENT_CAPTURE_PATH, JSON.stringify([
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input.url;
-  if (url === "https://auth.openai.com/oauth/token") return Response.json({ error: "invalid_grant" }, { status: 401 });
+  if (url === "https://auth.openai.com/oauth/token") {
+    if (process.env.CCX_TEST_AUTH_MODE === "offline") throw Object.assign(new Error("Test network unavailable"), { code: "ENOTFOUND" });
+    return Response.json({ error: "invalid_grant" }, { status: 401 });
+  }
   if (url === "https://api.anthropic.com/v1/messages") {
     await Bun.write(process.env.CCX_UPSTREAM_CAPTURE_PATH, JSON.stringify(Object.fromEntries(new Headers(init.headers))));
     return Response.json({ id: "msg_test", type: "message", role: "assistant", model: "claude-fable-5", content: [{ type: "text", text: "OK" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } });
@@ -333,6 +342,7 @@ globalThis.fetch = async (input, init) => {
     if (!subscription && headers.get("authorization") !== "Bearer fake-openai-key") throw new Error("Missing fallback API key");
     if (["missing", "expired"].includes(process.env.CCX_TEST_AUTH_MODE) && url !== "https://proxy.invalid/v1/responses") throw new Error("Fallback ignored custom base URL");
     const request = JSON.parse(init.body);
+    if (!JSON.stringify(request.input).includes("steer-marker")) throw new Error("Steering message was dropped");
     if (request.model !== "gpt-6-astra") throw new Error("Requested model changed");
     const toolName = request.tools[0].name;
     if (request.tools[0].strict !== false || request.tools[0].parameters.required?.includes("model")) throw new Error("Optional tool arguments became mandatory");
@@ -351,6 +361,7 @@ globalThis.fetch = async (input, init) => {
       headers: { "content-type": "text/event-stream" },
     });
   }
+  if (!new URL(url).hostname.match(/^(localhost|127\.0\.0\.1)$/)) throw new Error(`Unexpected external request: ${new URL(url).origin}`);
   return realFetch(input, init);
 };
 '@
@@ -373,6 +384,7 @@ if defined ANTHROPIC_AUTH_TOKEN (
 )
 :args
 if "%~1"=="" goto done
+if /i "%~1"=="--dangerously-skip-permissions" >>"%CCX_ENV_CAPTURE_PATH%" echo(permissions-skipped
 if /i "%~1"=="--settings" copy /y "%~2" "%CCX_SETTINGS_CAPTURE_PATH%" >nul
 shift
 goto args
@@ -396,7 +408,7 @@ exit /b %ERRORLEVEL%
             $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("{`"exp`":$expiry}")).TrimEnd('=').Replace('+','-').Replace('/','_')
             Set-Content -LiteralPath (Join-Path $env:CODEX_HOME 'auth.json') -Value "{`"auth_mode`":`"chatgpt`",`"tokens`":{`"access_token`":`"e30.$payload.fake`",`"account_id`":`"fake-account`",`"refresh_token`":`"do-not-copy`"}}"
         } elseif ($authMode -notin 'missing', 'unconfigured') {
-            $expiry = if ($authMode -like 'expired*') { 1 } else { 4102444800000 }
+            $expiry = if ($authMode -like 'expired*' -or $authMode -eq 'offline') { 1 } else { 4102444800000 }
             Set-Content -LiteralPath (Join-Path $claudishHome 'codex-oauth.json') -Value "{`"access_token`":`"fake-subscription-token`",`"refresh_token`":`"fake-refresh`",`"expires_at`":$expiry,`"account_id`":`"fake-account`"}"
         }
         Set-Content -LiteralPath (Join-Path $claudishHome 'all-models.json') -Value '{"version":2,"lastUpdated":"2026-08-06T00:00:00.000Z","entries":[{"modelId":"gpt-6-astra","aliases":["gpt-6-astra"],"contextWindow":1050000,"aggregators":[{"provider":"openai","contextWindow":1050000}]}],"models":[]}'
@@ -421,7 +433,7 @@ exit /b %ERRORLEVEL%
             $output = @(Invoke-CcxCommand `
                 -BunPath (Get-Command bun -CommandType Application).Source `
                 -ClaudishArgs $claudishArgs `
-                -OpenAIKey $(if ($expectAuthFailure) { '' } else { 'fake-openai-key' }) `
+                -OpenAIKey $(if ($authMode -in 'unconfigured', 'expired-no-key') { '' } else { 'fake-openai-key' }) `
                 -OpenAIBaseUrl $(if ($authMode -in 'missing', 'expired') { 'https://proxy.invalid' } else { 'https://api.openai.com' }))
         } finally {
             $env:CCX_ENV_CAPTURE_PATH = $oldCapturePath
@@ -441,7 +453,8 @@ exit /b %ERRORLEVEL%
         Assert-Sequence @(Get-Content -LiteralPath $environmentCapturePath) @(
             'openai-absent',
             'anthropic-key-absent',
-            'anthropic-token-absent'
+            'anthropic-token-absent',
+            'permissions-skipped'
         ) 'Claude child auth environment'
         $settings = Get-Content -LiteralPath $settingsCapturePath -Raw | ConvertFrom-Json
         Assert-True ($settings.disableClaudeAiConnectors -ne $true) 'Claudish does not disable connector discovery'
@@ -467,25 +480,6 @@ exit /b %ERRORLEVEL%
     }
 }
 
-}
-
-Test-Case 'OpenAI Responses starts workflow usage from the current request' {
-    $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
-    $ollamaStart = $source.IndexOf('function createOllamaJsonlStream')
-    $responsesStart = $source.IndexOf('function createResponsesStreamHandler')
-    $responsesEnd = $source.IndexOf('var init_openai_responses_sse', $responsesStart)
-    Assert-True ($ollamaStart -ge 0 -and $responsesStart -gt $ollamaStart -and $responsesEnd -gt $responsesStart) 'stream handlers are present in the expected order'
-
-    $ollama = $source.Substring($ollamaStart, $responsesStart - $ollamaStart)
-    $responses = $source.Substring($responsesStart, $responsesEnd - $responsesStart)
-    Assert-True ($source.Contains('initialInputTokens: Math.ceil(JSON.stringify(claudeRequest).length / 4)')) 'request token estimate is passed to the stream'
-    Assert-True ($responses.Contains('usage: messageStartUsage(opts.initialInputTokens)')) 'Responses message_start uses the request estimate'
-    Assert-True ($ollama.Contains('usage: messageStartUsage(opts.priorInputTokens)')) 'Ollama keeps upstream usage accounting'
-}
-
-Test-Case 'Claudish preserves mid-turn steering messages' {
-    $source = Get-Content -LiteralPath (Join-Path $root 'node_modules/claudish/dist/index.js') -Raw
-    Assert-True ($source.Contains('if (msg.role === "user" || msg.role === "system")')) 'mid-conversation system messages reach OpenAI'
 }
 
 Test-Case 'real Claudish passes redirected stdout handles to fake Claude under assignment and pipeline' {
